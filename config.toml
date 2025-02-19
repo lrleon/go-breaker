@@ -1,0 +1,4 @@
+memory_threshold = 80.0
+latency_threshold = 1500
+latency_window_size = 64
+percentile = 0.95
