@@ -2,6 +2,7 @@ package breaker
 
 import (
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -18,22 +19,29 @@ func newLatencyWindow(size int) *latencyWindow {
 	}
 }
 
-var lw = newLatencyWindow(100)
+var lw *latencyWindow
+var mx sync.Mutex
 
 func init() {
 
+	initConfig()
+	lw = newLatencyWindow(config.LatencyWindowSize)
 }
 
 // This function adds a new latency measurement to the window and must run
 // in a critical section
 func (lw *latencyWindow) add(startTime, endTime time.Time) {
-	lw.values[lw.index] = int64(endTime.Sub(startTime).Milliseconds())
+	mx.Lock()
+	defer mx.Unlock()
+	lw.values[lw.index] = endTime.Sub(startTime).Milliseconds()
 	lw.index = (lw.index + 1) % lw.size
 }
 
 // This function returns the latency percentile of the window and must run
 // in a critical section
 func (lw *latencyWindow) percentile(p float64) int64 {
+	mx.Lock()
+	defer mx.Unlock()
 	sorted := append([]int64{}, lw.values...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 	return sorted[int(float64(len(sorted))*p)]

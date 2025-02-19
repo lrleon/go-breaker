@@ -32,7 +32,7 @@ func Test_loadConfig(t *testing.T) {
 func Test_saveConfig(t *testing.T) {
 	type args struct {
 		path   string
-		config Config
+		config *Config
 	}
 	var tests []struct {
 		name    string

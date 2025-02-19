@@ -16,15 +16,15 @@ type Config struct {
 
 const configPath = "config.toml"
 
-var config Config
+var config *Config
 
-func loadConfig(path string) (Config, error) {
+func loadConfig(path string) (*Config, error) {
 	var config Config
-	_, err := toml.DecodeFile(path, &config)
-	return config, err
+	_, err := toml.DecodeFile(path, config)
+	return &config, err
 }
 
-func saveConfig(path string, config Config) error {
+func saveConfig(path string, config *Config) error {
 	file, err := os.Create(path)
 	if err != nil {
 		return err
@@ -41,14 +41,14 @@ func saveConfig(path string, config Config) error {
 	return encoder.Encode(config)
 }
 
-func init() {
+func initConfig() {
 	var err error
 
 	config, err = loadConfig(configPath)
 	if err != nil {
 		log.Printf("Error loading config file: %v", err)
 		log.Printf("Using default config")
-		config = Config{
+		config = &Config{
 			MemoryThreshold:   80,
 			LatencyThreshold:  1500,
 			LatencyWindowSize: 64,
