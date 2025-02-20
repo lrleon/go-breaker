@@ -20,7 +20,18 @@ func Test_breaker_latencyOK(t *testing.T) {
 		fields fields
 		want   bool
 	}{
-		// TODO: Add test cases.
+		// add some latencies below the threshold
+		{
+			name: "Test latencyOK true",
+			fields: fields{
+				latency: &latencyWindow{
+					values: []int64{100, 200, 300, 400, 500, 600, 700, 800, 900, 1000},
+					index:  0,
+					size:   10,
+				},
+			},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -53,7 +64,18 @@ func Test_latencyWindow_aboveThreshold(t *testing.T) {
 		args   args
 		want   bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "Test aboveThreshold true",
+			fields: fields{
+				values: []int64{100, 200, 300, 400, 500, 600, 700, 800, 900, 1000},
+				index:  0,
+				size:   10,
+			},
+			args: args{
+				threshold: 500,
+			},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -79,6 +101,16 @@ func Test_latencyWindow_add(t *testing.T) {
 		startTime time.Time
 		endTime   time.Time
 	}
+
+	timeNow := time.Now()
+	// generate 100 latencies between 300 and 1600
+	for i := 300; i < 1600; i += 13 {
+		latency := time.Duration(i) * time.Millisecond
+		startTime := timeNow.Add(-latency)
+		endTime := timeNow
+		lw.add(startTime, endTime)
+	}
+
 	tests := []struct {
 		name   string
 		fields fields
@@ -89,7 +121,7 @@ func Test_latencyWindow_add(t *testing.T) {
 			fields: fields{
 				values: make([]int64, 100),
 				index:  0,
-				size:   100,
+				size:   10,
 			},
 			args: args{
 				startTime: time.Now(),
@@ -107,6 +139,11 @@ func Test_latencyWindow_add(t *testing.T) {
 			lw.add(tt.args.startTime, tt.args.endTime)
 		})
 	}
+
+	// print the 95th percentile
+	p := 0.95
+	percentile := lw.percentile(p)
+	t.Logf("95th percentile: %d ms", percentile)
 }
 
 func Test_latencyWindow_belowThreshold(t *testing.T) {
@@ -124,7 +161,18 @@ func Test_latencyWindow_belowThreshold(t *testing.T) {
 		args   args
 		want   bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "Test belowThreshold false",
+			fields: fields{
+				values: []int64{100, 200, 300, 400, 500, 600, 700, 800, 900, 1000},
+				index:  0,
+				size:   10,
+			},
+			args: args{
+				threshold: 500,
+			},
+			want: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -140,22 +188,33 @@ func Test_latencyWindow_belowThreshold(t *testing.T) {
 	}
 }
 
-func Test_latencyWindow_percentile(t *testing.T) {
+func Test_latencyWindow_aboveThresholdLatencies(t *testing.T) {
 	type fields struct {
 		values []int64
 		index  int
 		size   int
 	}
 	type args struct {
-		p float64
+		threshold int64
 	}
 	tests := []struct {
 		name   string
 		fields fields
 		args   args
-		want   int64
+		want   []int64
 	}{
-		// TODO: Add test cases.
+		{
+			name: "Test latencyWindow aboveThresholdLatencies",
+			fields: fields{
+				values: []int64{100, 200, 300, 400, 500, 600, 700, 800, 900, 1000},
+				index:  0,
+				size:   10,
+			},
+			args: args{
+				threshold: 500,
+			},
+			want: []int64{600, 700, 800, 900, 1000},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -164,28 +223,8 @@ func Test_latencyWindow_percentile(t *testing.T) {
 				index:  tt.fields.index,
 				size:   tt.fields.size,
 			}
-			if got := lw.percentile(tt.args.p); got != tt.want {
-				t.Errorf("percentile() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func Test_newLatencyWindow(t *testing.T) {
-	type args struct {
-		size int
-	}
-	tests := []struct {
-		name string
-		args args
-		want *latencyWindow
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := newLatencyWindow(tt.args.size); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("newLatencyWindow() = %v, want %v", got, tt.want)
+			if got := lw.aboveThresholdLatencies(tt.args.threshold); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("aboveThresholdLatencies() = %v, want %v", got, tt.want)
 			}
 		})
 	}

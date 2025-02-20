@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// This config ios read from a toml file
+// Config This config ios read from a toml file
 type Config struct {
 	MemoryThreshold   float64 `toml:"memory_threshold"`
 	LatencyThreshold  int64   `toml:"latency_threshold"`
@@ -19,9 +19,9 @@ const configPath = "config.toml"
 var config *Config
 
 func loadConfig(path string) (*Config, error) {
-	var config Config
+	var config *Config = &Config{}
 	_, err := toml.DecodeFile(path, config)
-	return &config, err
+	return config, err
 }
 
 func saveConfig(path string, config *Config) error {

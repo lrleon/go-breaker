@@ -34,17 +34,30 @@ func (lw *latencyWindow) add(startTime, endTime time.Time) {
 	mx.Lock()
 	defer mx.Unlock()
 	lw.values[lw.index] = endTime.Sub(startTime).Milliseconds()
-	lw.index = (lw.index + 1) % lw.size
+	lw.index = (lw.index + 1) % lw.size // Circular buffer
 }
 
-// This function returns the latency percentile of the window and must run
-// in a critical section
+// This function returns the latency percentile in milliseconds of the window
+// and must run in a critical section
 func (lw *latencyWindow) percentile(p float64) int64 {
 	mx.Lock()
 	defer mx.Unlock()
 	sorted := append([]int64{}, lw.values...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 	return sorted[int(float64(len(sorted))*p)]
+}
+
+// Return a slice with the latencies above the threshold
+func (lw *latencyWindow) aboveThresholdLatencies(threshold int64) []int64 {
+	mx.Lock()
+	defer mx.Unlock()
+	latencies := []int64{}
+	for _, latency := range lw.values {
+		if latency > threshold {
+			latencies = append(latencies, latency)
+		}
+	}
+	return latencies
 }
 
 // Return true if the latency is above the threshold
