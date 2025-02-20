@@ -12,6 +12,7 @@ type Config struct {
 	LatencyThreshold  int64   `toml:"latency_threshold"`
 	LatencyWindowSize int     `toml:"latency_window_size"`
 	Percentile        float64 `toml:"percentile"`
+	WaitTime          int     `toml:"wait_time"` // Time to wait before reset latencyWindow in seconds
 }
 
 const configPath = "config.toml"

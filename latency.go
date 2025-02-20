@@ -2,7 +2,6 @@ package breaker
 
 import (
 	"sort"
-	"sync"
 	"time"
 )
 
@@ -19,29 +18,16 @@ func newLatencyWindow(size int) *latencyWindow {
 	}
 }
 
-var lw *latencyWindow
-var mx sync.Mutex
-
-func init() {
-
-	initConfig()
-	lw = newLatencyWindow(config.LatencyWindowSize)
-}
-
-// This function adds a new latency measurement to the window and must run
+// This function adds a new latencyWindow measurement to the window and must run
 // in a critical section
 func (lw *latencyWindow) add(startTime, endTime time.Time) {
-	mx.Lock()
-	defer mx.Unlock()
 	lw.values[lw.index] = endTime.Sub(startTime).Milliseconds()
 	lw.index = (lw.index + 1) % lw.size // Circular buffer
 }
 
-// This function returns the latency percentile in milliseconds of the window
+// This function returns the latencyWindow percentile in milliseconds of the window
 // and must run in a critical section
 func (lw *latencyWindow) percentile(p float64) int64 {
-	mx.Lock()
-	defer mx.Unlock()
 	sorted := append([]int64{}, lw.values...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 	return sorted[int(float64(len(sorted))*p)]
@@ -49,8 +35,7 @@ func (lw *latencyWindow) percentile(p float64) int64 {
 
 // Return a slice with the latencies above the threshold
 func (lw *latencyWindow) aboveThresholdLatencies(threshold int64) []int64 {
-	mx.Lock()
-	defer mx.Unlock()
+
 	latencies := []int64{}
 	for _, latency := range lw.values {
 		if latency > threshold {
@@ -60,17 +45,17 @@ func (lw *latencyWindow) aboveThresholdLatencies(threshold int64) []int64 {
 	return latencies
 }
 
-// Return true if the latency is above the threshold
+// Return true if the latencyWindow is above the threshold
 func (lw *latencyWindow) aboveThreshold(threshold int64) bool {
 	return lw.percentile(0.99) > threshold
 }
 
-// Return true if the latency is below the threshold
+// Return true if the latencyWindow is below the threshold
 func (lw *latencyWindow) belowThreshold(threshold int64) bool {
 	return lw.percentile(0.99) < threshold
 }
 
-// Return true if the latency is OK
+// Return true if the latencyWindow is OK
 func (b *breaker) latencyOK() bool {
-	return lw.belowThreshold(100)
+	return b.latencyWindow.belowThreshold(b.config.LatencyThreshold)
 }

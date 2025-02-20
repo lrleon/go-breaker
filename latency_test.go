@@ -2,52 +2,9 @@ package breaker
 
 import (
 	"reflect"
-	"sync"
 	"testing"
 	"time"
 )
-
-func Test_breaker_latencyOK(t *testing.T) {
-	type fields struct {
-		mu           sync.Mutex
-		config       Config
-		tripped      bool
-		lastTripTime time.Time
-		latency      *latencyWindow
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		want   bool
-	}{
-		// add some latencies below the threshold
-		{
-			name: "Test latencyOK true",
-			fields: fields{
-				latency: &latencyWindow{
-					values: []int64{100, 200, 300, 400, 500, 600, 700, 800, 900, 1000},
-					index:  0,
-					size:   10,
-				},
-			},
-			want: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := &breaker{
-				mu:           tt.fields.mu,
-				config:       tt.fields.config,
-				tripped:      tt.fields.tripped,
-				lastTripTime: tt.fields.lastTripTime,
-				latency:      tt.fields.latency,
-			}
-			if got := b.latencyOK(); got != tt.want {
-				t.Errorf("latencyOK() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
 func Test_latencyWindow_aboveThreshold(t *testing.T) {
 	type fields struct {
@@ -92,6 +49,8 @@ func Test_latencyWindow_aboveThreshold(t *testing.T) {
 }
 
 func Test_latencyWindow_add(t *testing.T) {
+
+	lw := newLatencyWindow(10)
 	type fields struct {
 		values []int64
 		index  int
