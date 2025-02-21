@@ -38,11 +38,10 @@ func (b *breaker) Allow() bool {
 	defer b.mu.Unlock()
 	if b.tripped {
 		if time.Since(b.lastTripTime) > time.Duration(b.config.WaitTime)*time.Second {
-			return false
+			b.tripped = true
 		}
-		b.Reset()
 	}
-	return !b.memoryOK()
+	return b.memoryOK()
 }
 
 func (b *breaker) Done(startTime, endTime time.Time) {
