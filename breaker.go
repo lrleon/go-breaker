@@ -6,8 +6,8 @@ import (
 )
 
 type Breaker interface {
-	Allow() bool                       // Returns if the operation can continue
-	Done(startTime, endTime time.Time) // Reports the latencyWindow of an operation finished
+	Allow() bool                       // Returns if the operation can continue and updates the state of the Breaker
+	Done(startTime, endTime time.Time) // Reports the latency of an operation finished
 	Triggered() bool                   // Indicate if the breaker is activated
 	Reset()                            // Restores the state of Breaker
 }
@@ -50,8 +50,10 @@ func (b *breaker) Done(startTime, endTime time.Time) {
 	defer b.mu.Unlock()
 
 	b.latencyWindow.add(startTime, endTime)
-	if b.latencyWindow.percentile(b.config.Percentile) > b.config.LatencyThreshold ||
-		!b.memoryOK() {
+	latencyPercentile := b.latencyWindow.percentile(b.config.Percentile)
+	memoryStatus := b.memoryOK()
+	if latencyPercentile > b.config.LatencyThreshold ||
+		!memoryStatus {
 		b.tripped = true
 		b.lastTripTime = time.Now()
 	}

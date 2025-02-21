@@ -8,11 +8,11 @@ import (
 
 // Config This config ios read from a toml file
 type Config struct {
-	MemoryThreshold   float64 `toml:"memory_threshold"`
-	LatencyThreshold  int64   `toml:"latency_threshold"`
-	LatencyWindowSize int     `toml:"latency_window_size"`
-	Percentile        float64 `toml:"percentile"`
-	WaitTime          int     `toml:"wait_time"` // Time to wait before reset latencyWindow in seconds
+	MemoryThreshold   float64 `toml:"memory_threshold"`    // Percentage of memory usage
+	LatencyThreshold  int64   `toml:"latency_threshold"`   // In milliseconds
+	LatencyWindowSize int     `toml:"latency_window_size"` // Number of latencies to keep
+	Percentile        float64 `toml:"percentile"`          // Percentile to use
+	WaitTime          int     `toml:"wait_time"`           // Time to wait before reset latencyWindow in seconds
 }
 
 const configPath = "config.toml"

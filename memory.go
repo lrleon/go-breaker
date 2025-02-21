@@ -45,3 +45,8 @@ func (b *breaker) memoryOK() bool {
 
 	return float64(m.Alloc) < float64(memoryLimit)*b.config.MemoryThreshold
 }
+
+// SetMemoryLimitFile Set the memory limit file for testing
+func SetMemoryLimitFile(sz int64) {
+	memoryLimit = sz
+}

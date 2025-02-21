@@ -1,182 +1,65 @@
 package breaker
 
 import (
-	"reflect"
-	"sync"
+	"math/rand"
 	"testing"
 	"time"
 )
 
-func TestNewBreaker(t *testing.T) {
-	type args struct {
-		config Config
+func Test_breaker_should_not_trigger_if_latencies_are_below_threshold(t *testing.T) {
+
+	memoryLimit = 512 * 1024 * 1024 // 512 MB
+
+	b := NewBreaker(Config{
+		MemoryThreshold:   0.85,
+		LatencyThreshold:  600,
+		LatencyWindowSize: 10,
+		Percentile:        0.95,
+		WaitTime:          10,
+	})
+
+	// Add 100 latencies below the threshold and verify the breaker is not triggered
+	for i := 0; i < 100; i++ {
+		// random latency between 100 and 500
+		val := rand.Int()%400 + 100
+		latency := time.Duration(val) * time.Millisecond
+		startTime := time.Now().Add(-latency)
+		endTime := time.Now()
+		b.Done(startTime, endTime)
 	}
-	tests := []struct {
-		name string
-		args args
-		want Breaker
-	}{
-		// TODO: Add test cases.
+
+	if b.Triggered() {
+		t.Error("Breaker should not be triggered")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := NewBreaker(tt.args.config); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("NewBreaker() = %v, want %v", got, tt.want)
-			}
-		})
+
+	if !b.Allow() {
+		t.Error("Breaker should allow")
 	}
 }
 
-func Test_breaker_Allow(t *testing.T) {
-	type fields struct {
-		mu            sync.Mutex
-		config        Config
-		tripped       bool
-		lastTripTime  time.Time
-		latencyWindow *latencyWindow
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		want   bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := &breaker{
-				mu:            tt.fields.mu,
-				config:        tt.fields.config,
-				tripped:       tt.fields.tripped,
-				lastTripTime:  tt.fields.lastTripTime,
-				latencyWindow: tt.fields.latencyWindow,
-			}
-			if got := b.Allow(); got != tt.want {
-				t.Errorf("Allow() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
+func Test_breaker_should_trigger_if_latencies_are_above_threshold(t *testing.T) {
 
-func Test_breaker_Done(t *testing.T) {
-	type fields struct {
-		mu            sync.Mutex
-		config        Config
-		tripped       bool
-		lastTripTime  time.Time
-		latencyWindow *latencyWindow
-	}
-	type args struct {
-		startTime time.Time
-		endTime   time.Time
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		args   args
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := &breaker{
-				mu:            tt.fields.mu,
-				config:        tt.fields.config,
-				tripped:       tt.fields.tripped,
-				lastTripTime:  tt.fields.lastTripTime,
-				latencyWindow: tt.fields.latencyWindow,
-			}
-			b.Done(tt.args.startTime, tt.args.endTime)
-		})
-	}
-}
+	memoryLimit = 512 * 1024 * 1024 // 512 MB
 
-func Test_breaker_Reset(t *testing.T) {
-	type fields struct {
-		mu            sync.Mutex
-		config        Config
-		tripped       bool
-		lastTripTime  time.Time
-		latencyWindow *latencyWindow
-	}
-	tests := []struct {
-		name   string
-		fields fields
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := &breaker{
-				mu:            tt.fields.mu,
-				config:        tt.fields.config,
-				tripped:       tt.fields.tripped,
-				lastTripTime:  tt.fields.lastTripTime,
-				latencyWindow: tt.fields.latencyWindow,
-			}
-			b.Reset()
-		})
-	}
-}
+	b := NewBreaker(Config{
+		MemoryThreshold:   0.85,
+		LatencyThreshold:  600,
+		LatencyWindowSize: 10,
+		Percentile:        0.95,
+		WaitTime:          10,
+	})
 
-func Test_breaker_Triggered(t *testing.T) {
-	type fields struct {
-		mu            sync.Mutex
-		config        Config
-		tripped       bool
-		lastTripTime  time.Time
-		latencyWindow *latencyWindow
+	// Add 100 latencies above the threshold and verify the breaker is triggered
+	for i := 0; i < 100; i++ {
+		// random latency between 700 and 1000
+		val := rand.Int()%300 + 700
+		latency := time.Duration(val) * time.Millisecond
+		startTime := time.Now().Add(-latency)
+		endTime := time.Now()
+		b.Done(startTime, endTime)
 	}
-	tests := []struct {
-		name   string
-		fields fields
-		want   bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := &breaker{
-				mu:            tt.fields.mu,
-				config:        tt.fields.config,
-				tripped:       tt.fields.tripped,
-				lastTripTime:  tt.fields.lastTripTime,
-				latencyWindow: tt.fields.latencyWindow,
-			}
-			if got := b.Triggered(); got != tt.want {
-				t.Errorf("Triggered() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
-func Test_breaker_isHealthy(t *testing.T) {
-	type fields struct {
-		mu            sync.Mutex
-		config        Config
-		tripped       bool
-		lastTripTime  time.Time
-		latencyWindow *latencyWindow
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		want   bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := &breaker{
-				mu:            tt.fields.mu,
-				config:        tt.fields.config,
-				tripped:       tt.fields.tripped,
-				lastTripTime:  tt.fields.lastTripTime,
-				latencyWindow: tt.fields.latencyWindow,
-			}
-			if got := b.isHealthy(); got != tt.want {
-				t.Errorf("isHealthy() = %v, want %v", got, tt.want)
-			}
-		})
+	if !b.Triggered() {
+		t.Error("Breaker should be triggered")
 	}
 }
