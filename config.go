@@ -15,7 +15,7 @@ type Config struct {
 	WaitTime          int     `toml:"wait_time"`           // Time to wait before reset latencyWindow in seconds
 }
 
-const configPath = "config.toml"
+const configPath = "breaker-config.toml"
 
 var config *Config
 
