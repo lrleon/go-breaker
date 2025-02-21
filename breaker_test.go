@@ -33,7 +33,7 @@ func Test_breaker_should_not_trigger_if_latencies_are_below_threshold(t *testing
 	}
 
 	if !b.Allow() {
-		t.Error("Breaker should allow")
+		t.Error("Breaker should not allow")
 	}
 }
 
@@ -62,4 +62,9 @@ func Test_breaker_should_trigger_if_latencies_are_above_threshold(t *testing.T) 
 	if !b.Triggered() {
 		t.Error("Breaker should be triggered")
 	}
+
+	if !b.Allow() {
+		t.Error("Breaker should allow")
+	}
+
 }

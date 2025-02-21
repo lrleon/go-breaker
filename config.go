@@ -19,13 +19,13 @@ const configPath = "breaker-config.toml"
 
 var config *Config
 
-func loadConfig(path string) (*Config, error) {
+func LoadConfig(path string) (*Config, error) {
 	var config *Config = &Config{}
 	_, err := toml.DecodeFile(path, config)
 	return config, err
 }
 
-func saveConfig(path string, config *Config) error {
+func SaveConfig(path string, config *Config) error {
 	file, err := os.Create(path)
 	if err != nil {
 		return err
@@ -45,7 +45,7 @@ func saveConfig(path string, config *Config) error {
 func initConfig() {
 	var err error
 
-	config, err = loadConfig(configPath)
+	config, err = LoadConfig(configPath)
 	if err != nil {
 		log.Printf("Error loading config file: %v", err)
 		log.Printf("Using default config")
@@ -56,7 +56,7 @@ func initConfig() {
 			Percentile:        0.95,
 		}
 		// Save the default config to the file
-		err := saveConfig(configPath, config)
+		err := SaveConfig(configPath, config)
 		if err != nil {
 			log.Panicf("Error saving default config: %v", err)
 		}

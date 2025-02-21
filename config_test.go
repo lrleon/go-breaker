@@ -17,13 +17,13 @@ func Test_loadConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := loadConfig(tt.args.path)
+			got, err := LoadConfig(tt.args.path)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("loadConfig() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("LoadConfig() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("loadConfig() got = %v, want %v", got, tt.want)
+				t.Errorf("LoadConfig() got = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -41,8 +41,8 @@ func Test_saveConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := saveConfig(tt.args.path, tt.args.config); (err != nil) != tt.wantErr {
-				t.Errorf("saveConfig() error = %v, wantErr %v", err, tt.wantErr)
+			if err := SaveConfig(tt.args.path, tt.args.config); (err != nil) != tt.wantErr {
+				t.Errorf("SaveConfig() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
