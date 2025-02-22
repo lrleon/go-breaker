@@ -3,31 +3,36 @@ package main
 import (
 	"fmt"
 	"github.com/gin-gonic/gin"
-	cb "github.com/lrleon/go-breaker"
 	"net/http"
 	"time"
+
+	// Import the breaker package
+	cb "github.com/lrleon/go-breaker/breaker"
 )
 
 // example of a server using breaker
 
-var config = cb.Config{
+var delayInMilliseconds time.Duration = 1000
+
+// Create a default configuration
+var config = &cb.Config{
 	MemoryThreshold:   80,
 	LatencyThreshold:  1500,
 	LatencyWindowSize: 64,
 	Percentile:        0.95,
 }
 
-var delayInMilliseconds time.Duration = 1000
-
-var ApiBreaker = cb.NewBreaker(config)
-
-var BreakerAPI cb.BreakerAPI = cb.BreakerAPI{
-	Config: config,
+var breakerAPI = cb.BreakerAPI{
+	Config: *config,
 }
 
+// Create a new breaker
+var ApiBreaker = cb.NewBreaker(*config)
+
 func test_endpoint(ctx *gin.Context) {
+
 	if !ApiBreaker.Allow() {
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service unavailable"})
+		ctx.JSON(http.StatusTooManyRequests, gin.H{"error": "Service unavailable"})
 		return
 	}
 
@@ -55,20 +60,22 @@ func set_delay(ctx *gin.Context) {
 
 func main() {
 
+	cb.MemoryLimit = 512 * 1024 * 1024 // 512 MB
+
 	// Set endpoints, including the breaker endpoints
 	router := gin.Default()
-	router.GET("/", test_endpoint)
+	router.GET("/test", test_endpoint)
 	router.GET("/set_delay", set_delay)
-	router.GET("/breaker/memory", BreakerAPI.GetMemory)
-	router.GET("/breaker/latency", BreakerAPI.GetLatency)
-	router.GET("/breaker/latency_window_size", BreakerAPI.GetLatencyWindowSize)
-	router.GET("/breaker/percentile", BreakerAPI.GetPercentile)
-	router.GET("/breaker/wait", BreakerAPI.GetWait)
-	router.GET("/breaker/set_memory", BreakerAPI.SetMemory)
-	router.GET("/breaker/set_latency", BreakerAPI.SetLatency)
-	router.GET("/breaker/set_latency_window_size", BreakerAPI.SetLatencyWindowSize)
-	router.GET("/breaker/set_percentile", BreakerAPI.SetPercentile)
-	router.GET("/breaker/set_wait", BreakerAPI.SetWait)
+	router.GET("/memory", breakerAPI.GetMemory)
+	router.GET("/latency", breakerAPI.GetLatency)
+	router.GET("/latency_window_size", breakerAPI.GetLatencyWindowSize)
+	router.GET("/percentile", breakerAPI.GetPercentile)
+	router.GET("/wait", breakerAPI.GetWait)
+	router.GET("/set_memory", breakerAPI.SetMemory)
+	router.GET("/set_latency", breakerAPI.SetLatency)
+	router.GET("/set_latency_window_size", breakerAPI.SetLatencyWindowSize)
+	router.GET("/set_percentile", breakerAPI.SetPercentile)
+	router.GET("/set_wait", breakerAPI.SetWait)
 
 	fmt.Println("Starting server at port 8080")
 

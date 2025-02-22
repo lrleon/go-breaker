@@ -1,4 +1,4 @@
-package go_breaker
+package breaker
 
 import (
 	"log"
@@ -94,19 +94,19 @@ func (b *BreakerAPI) GetLatency(ctx *gin.Context) {
 
 func (b *BreakerAPI) SetLatencyWindowSize(ctx *gin.Context) {
 
-	// error if latency window size is less than 11 or greater or equal
+	// error if latency window Size is less than 11 or greater or equal
 	// than 1021
 	latencyStr := ctx.Query("latency")
 	latency, err := strconv.Atoi(latencyStr)
 	if err != nil {
-		log.Printf("Invalid latency window size: %v", latencyStr)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid latency window size"})
+		log.Printf("Invalid latency window Size: %v", latencyStr)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid latency window Size"})
 		return
 	}
 
 	if latency < 1 || latency >= 1021 {
-		log.Printf("Invalid latency window size: %v", latency)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid latency window size"})
+		log.Printf("Invalid latency window Size: %v", latency)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid latency window Size"})
 		return
 	}
 
@@ -121,7 +121,7 @@ func (b *BreakerAPI) SetLatencyWindowSize(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Latency window size set to " + latencyStr})
+	ctx.JSON(http.StatusOK, gin.H{"message": "Latency window Size set to " + latencyStr})
 }
 
 func (b *BreakerAPI) GetLatencyWindowSize(ctx *gin.Context) {

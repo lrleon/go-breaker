@@ -1,4 +1,4 @@
-package go_breaker
+package breaker
 
 import (
 	"sync"
@@ -17,20 +17,20 @@ type breaker struct {
 	config        Config
 	tripped       bool
 	lastTripTime  time.Time
-	latencyWindow *latencyWindow
+	latencyWindow *LatencyWindow
 }
 
 func NewBreaker(config Config) Breaker {
 	return &breaker{
 		config:        config,
-		latencyWindow: newLatencyWindow(config.LatencyWindowSize),
+		latencyWindow: NewLatencyWindow(config.LatencyWindowSize),
 	}
 }
 
-// Return true if the memory usage is above the threshold and the latencyWindow
+// Return true if the memory usage is above the threshold and the LatencyWindow
 // is below the threshold
 func (b *breaker) isHealthy() bool {
-	return b.memoryOK() && b.latencyOK()
+	return b.MemoryOK() && b.LatencyOK()
 }
 
 func (b *breaker) Allow() bool {
@@ -41,16 +41,16 @@ func (b *breaker) Allow() bool {
 			b.tripped = true
 		}
 	}
-	return b.memoryOK()
+	return b.MemoryOK()
 }
 
 func (b *breaker) Done(startTime, endTime time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.latencyWindow.add(startTime, endTime)
-	latencyPercentile := b.latencyWindow.percentile(b.config.Percentile)
-	memoryStatus := b.memoryOK()
+	b.latencyWindow.Add(startTime, endTime)
+	latencyPercentile := b.latencyWindow.Percentile(b.config.Percentile)
+	memoryStatus := b.MemoryOK()
 	if latencyPercentile > b.config.LatencyThreshold ||
 		!memoryStatus {
 		b.tripped = true

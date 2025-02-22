@@ -1,4 +1,4 @@
-package go_breaker
+package breaker
 
 import (
 	"log"
@@ -7,10 +7,10 @@ import (
 	"strconv"
 )
 
-var memoryLimitFile = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+var MemoryLimitFile = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
 
-func getK8sMemoryLimit() (int64, error) {
-	data, err := os.ReadFile(memoryLimitFile)
+func GetK8sMemoryLimit() (int64, error) {
+	data, err := os.ReadFile(MemoryLimitFile)
 	if err != nil {
 		return 0, err
 	}
@@ -21,17 +21,17 @@ func getK8sMemoryLimit() (int64, error) {
 	return limit, nil
 }
 
-var memoryLimit int64
+var MemoryLimit int64
 
 func init() {
 
 	// run only if we are in a k8s environment
-	if _, err := os.Stat(memoryLimitFile); os.IsNotExist(err) {
+	if _, err := os.Stat(MemoryLimitFile); os.IsNotExist(err) {
 		log.Print("Not running in a k8s environment")
 		return
 	}
 	var err error
-	memoryLimit, err = getK8sMemoryLimit()
+	MemoryLimit, err = GetK8sMemoryLimit()
 	if err != nil {
 		panic(err)
 	}
@@ -39,14 +39,14 @@ func init() {
 
 // Return true if the memory usage is above the threshold. The threshold is
 // calculated based on the memory limit of the container
-func (b *breaker) memoryOK() bool {
+func (b *breaker) MemoryOK() bool {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	return float64(m.Alloc) < float64(memoryLimit)*b.config.MemoryThreshold
+	return float64(m.Alloc) < float64(MemoryLimit)*b.config.MemoryThreshold
 }
 
 // SetMemoryLimitFile Set the memory limit file for testing
 func SetMemoryLimitFile(sz int64) {
-	memoryLimit = sz
+	MemoryLimit = sz
 }

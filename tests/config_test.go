@@ -1,6 +1,7 @@
-package go_breaker
+package tests
 
 import (
+	"github.com/lrleon/go-breaker/breaker"
 	"reflect"
 	"testing"
 )
@@ -12,12 +13,12 @@ func Test_loadConfig(t *testing.T) {
 	var tests []struct {
 		name    string
 		args    args
-		want    Config
+		want    breaker.Config
 		wantErr bool
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := LoadConfig(tt.args.path)
+			got, err := breaker.LoadConfig(tt.args.path)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LoadConfig() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -32,7 +33,7 @@ func Test_loadConfig(t *testing.T) {
 func Test_saveConfig(t *testing.T) {
 	type args struct {
 		path   string
-		config *Config
+		config *breaker.Config
 	}
 	var tests []struct {
 		name    string
@@ -41,7 +42,7 @@ func Test_saveConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := SaveConfig(tt.args.path, tt.args.config); (err != nil) != tt.wantErr {
+			if err := breaker.SaveConfig(tt.args.path, tt.args.config); (err != nil) != tt.wantErr {
 				t.Errorf("SaveConfig() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})

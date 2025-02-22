@@ -74,7 +74,7 @@ The `Config` struct is used to configure the breaker. It includes the following 
 
 - `MemoryThreshold`: The memory usage threshold as a fraction of the memory limit.
 - `LatencyThreshold`: The latency threshold in milliseconds.
-- `LatencyWindowSize`: The size of the latency window.
+- `LatencyWindowSize`: The Size of the latency window.
 - `Percentile`: The percentile of latencies to consider.
 - `WaitTime`: The time to wait before allowing operations after the breaker is tripped.
 

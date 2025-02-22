@@ -1,6 +1,7 @@
-package go_breaker
+package tests
 
 import (
+	"github.com/lrleon/go-breaker/breaker"
 	"math/rand"
 	"testing"
 	"time"
@@ -8,9 +9,9 @@ import (
 
 func Test_breaker_should_not_trigger_if_latencies_are_below_threshold(t *testing.T) {
 
-	memoryLimit = 512 * 1024 * 1024 // 512 MB
+	breaker.MemoryLimit = 512 * 1024 * 1024 // 512 MB
 
-	b := NewBreaker(Config{
+	b := breaker.NewBreaker(breaker.Config{
 		MemoryThreshold:   0.85,
 		LatencyThreshold:  600,
 		LatencyWindowSize: 10,
@@ -22,6 +23,11 @@ func Test_breaker_should_not_trigger_if_latencies_are_below_threshold(t *testing
 	for i := 0; i < 100; i++ {
 		// random latency between 100 and 500
 		val := rand.Int()%400 + 100
+
+		if val > 500 {
+			t.Error("Latency should be below 500")
+		}
+
 		latency := time.Duration(val) * time.Millisecond
 		startTime := time.Now().Add(-latency)
 		endTime := time.Now()
@@ -33,15 +39,15 @@ func Test_breaker_should_not_trigger_if_latencies_are_below_threshold(t *testing
 	}
 
 	if !b.Allow() {
-		t.Error("Breaker should not allow")
+		t.Error("Breaker should allow")
 	}
 }
 
 func Test_breaker_should_trigger_if_latencies_are_above_threshold(t *testing.T) {
 
-	memoryLimit = 512 * 1024 * 1024 // 512 MB
+	breaker.MemoryLimit = 512 * 1024 * 1024 // 512 MB
 
-	b := NewBreaker(Config{
+	b := breaker.NewBreaker(breaker.Config{
 		MemoryThreshold:   0.85,
 		LatencyThreshold:  600,
 		LatencyWindowSize: 10,

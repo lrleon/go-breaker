@@ -1,6 +1,7 @@
-package go_breaker
+package tests
 
 import (
+	"github.com/lrleon/go-breaker/breaker"
 	"os"
 	"testing"
 )
@@ -14,9 +15,9 @@ func TestK8SGetMemoryLimit(t *testing.T) {
 		if err != nil {
 
 		}
-	}(memoryLimitFile)
-	memoryLimitFile = "memory.limit_in_bytes"
-	file, err := os.Create(memoryLimitFile)
+	}(breaker.MemoryLimitFile)
+	breaker.MemoryLimitFile = "memory.limit_in_bytes"
+	file, err := os.Create(breaker.MemoryLimitFile)
 	if err != nil {
 		t.Fatalf("Error creating file: %v", err)
 	}
@@ -31,7 +32,7 @@ func TestK8SGetMemoryLimit(t *testing.T) {
 		return
 	} // 512 MB
 
-	limit, err := getK8sMemoryLimit()
+	limit, err := breaker.GetK8sMemoryLimit()
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -51,9 +52,9 @@ func TestGetMemoryLimit_Error(t *testing.T) {
 		if err != nil {
 
 		}
-	}(memoryLimitFile)
-	memoryLimitFile = "memory.limit_in_bytes"
-	file, err := os.Create(memoryLimitFile)
+	}(breaker.MemoryLimitFile)
+	breaker.MemoryLimitFile = "memory.limit_in_bytes"
+	file, err := os.Create(breaker.MemoryLimitFile)
 	if err != nil {
 		t.Fatalf("Error creating file: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestGetMemoryLimit_Error(t *testing.T) {
 		return
 	} // invalid value
 
-	_, err = getK8sMemoryLimit()
+	_, err = breaker.GetK8sMemoryLimit()
 	if err == nil {
 		t.Fatal("Expected error, got nil")
 	}
@@ -82,9 +83,9 @@ func TestGetMemoryLimit_Good(t *testing.T) {
 		if err != nil {
 
 		}
-	}(memoryLimitFile)
-	memoryLimitFile = "memory.limit_in_bytes"
-	file, err := os.Create(memoryLimitFile)
+	}(breaker.MemoryLimitFile)
+	breaker.MemoryLimitFile = "memory.limit_in_bytes"
+	file, err := os.Create(breaker.MemoryLimitFile)
 	if err != nil {
 		t.Fatalf("Error creating file: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestGetMemoryLimit_Good(t *testing.T) {
 		return
 	} // invalid value
 
-	_, err = getK8sMemoryLimit()
+	_, err = breaker.GetK8sMemoryLimit()
 	if err != nil {
 		t.Fatal("Expected nil, got error")
 	}

@@ -1,4 +1,4 @@
-package go_breaker
+package breaker
 
 import (
 	"github.com/BurntSushi/toml"
@@ -12,7 +12,7 @@ type Config struct {
 	LatencyThreshold  int64   `toml:"latency_threshold"`   // In milliseconds
 	LatencyWindowSize int     `toml:"latency_window_size"` // Number of latencies to keep
 	Percentile        float64 `toml:"percentile"`          // Percentile to use
-	WaitTime          int     `toml:"wait_time"`           // Time to wait before reset latencyWindow in seconds
+	WaitTime          int     `toml:"wait_time"`           // Time to wait before reset LatencyWindow in seconds
 }
 
 const configPath = "breaker-Config.toml"
@@ -40,27 +40,4 @@ func SaveConfig(path string, config *Config) error {
 
 	encoder := toml.NewEncoder(file)
 	return encoder.Encode(config)
-}
-
-func initConfig() {
-	var err error
-
-	config, err = LoadConfig(configPath)
-	if err != nil {
-		log.Printf("Error loading Config file: %v", err)
-		log.Printf("Using default Config")
-		config = &Config{
-			MemoryThreshold:   80,
-			LatencyThreshold:  1500,
-			LatencyWindowSize: 64,
-			Percentile:        0.95,
-		}
-		// Save the default Config to the file
-		err := SaveConfig(configPath, config)
-		if err != nil {
-			log.Panicf("Error saving default Config: %v", err)
-		}
-	}
-
-	log.Printf("Config: %v", config)
 }
