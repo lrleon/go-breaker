@@ -1,7 +1,7 @@
 ```markdown
 # Breaker Package
 
-The `breaker` package provides a circuit breaker implementation in Go. It helps to prevent system overload by monitoring memory usage and latency, and tripping the breaker when thresholds are exceeded.
+The `breaker` package provides a circuit breaker implementation in Go. It helps to prevent system overload by monitoring memory usage and size, and tripping the breaker when thresholds are exceeded.
 
 ## Interface
 
@@ -10,7 +10,7 @@ The `Breaker` interface defines the following methods:
 ```go
 type Breaker interface {
     Allow() bool                       // Returns if the operation can continue and updates the state of the Breaker
-    Done(startTime, endTime time.Time) // Reports the latency of an operation finished
+    Done(startTime, endTime time.Time) // Reports the size of an operation finished
     Triggered() bool                   // Indicate if the breaker is activated
     Reset()                            // Restores the state of Breaker
 }
@@ -46,7 +46,7 @@ func (b *breaker) Allow() bool
 
 ### Done
 
-Reports the latency of a finished operation.
+Reports the size of a finished operation.
 
 ```go
 func (b *breaker) Done(startTime, endTime time.Time)
@@ -73,8 +73,8 @@ func (b *breaker) Reset()
 The `Config` struct is used to configure the breaker. It includes the following fields:
 
 - `MemoryThreshold`: The memory usage threshold as a fraction of the memory limit.
-- `LatencyThreshold`: The latency threshold in milliseconds.
-- `LatencyWindowSize`: The Size of the latency window.
+- `LatencyThreshold`: The size threshold in milliseconds.
+- `LatencyWindowSize`: The Size of the size window.
 - `Percentile`: The percentile of latencies to consider.
 - `WaitTime`: The time to wait before allowing operations after the breaker is tripped.
 
@@ -101,7 +101,7 @@ func main() {
 
     // Simulate an operation
     startTime := time.Now()
-    time.Sleep(500 * time.Millisecond) // Simulate latency
+    time.Sleep(500 * time.Millisecond) // Simulate size
     endTime := time.Now()
 
     b.Done(startTime, endTime)

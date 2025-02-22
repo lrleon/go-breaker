@@ -94,26 +94,26 @@ func (b *BreakerAPI) GetLatency(ctx *gin.Context) {
 
 func (b *BreakerAPI) SetLatencyWindowSize(ctx *gin.Context) {
 
-	// error if latency window Size is less than 11 or greater or equal
+	// error if size window Size is less than 11 or greater or equal
 	// than 1021
-	latencyStr := ctx.Query("latency")
-	latency, err := strconv.Atoi(latencyStr)
+	sizeStr := ctx.Query("size")
+	size, err := strconv.Atoi(sizeStr)
 	if err != nil {
-		log.Printf("Invalid latency window Size: %v", latencyStr)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid latency window Size"})
+		log.Printf("Invalid size window Size: %v", sizeStr)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid size window Size"})
 		return
 	}
 
-	if latency < 1 || latency >= 1021 {
-		log.Printf("Invalid latency window Size: %v", latency)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid latency window Size"})
+	if size < 1 || size >= 1021 {
+		log.Printf("Invalid size window Size: %v", size)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid size window Size"})
 		return
 	}
 
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	b.Config.LatencyWindowSize = latency
+	b.Config.LatencyWindowSize = size
 	err = SaveConfig("breaker-Config.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
@@ -121,7 +121,7 @@ func (b *BreakerAPI) SetLatencyWindowSize(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"message": "Latency window Size set to " + latencyStr})
+	ctx.JSON(http.StatusOK, gin.H{"message": "Latency window Size set to " + sizeStr})
 }
 
 func (b *BreakerAPI) GetLatencyWindowSize(ctx *gin.Context) {
@@ -171,7 +171,7 @@ func (b *BreakerAPI) GetPercentile(ctx *gin.Context) {
 
 func (b *BreakerAPI) SetWait(ctx *gin.Context) {
 
-	// error if wait is less than 3 seconds or greater or equal than 10 seconds
+	// error if wait is less than 1 seconds or greater or equal than 10 seconds
 	waitStr := ctx.Query("wait")
 	wait, err := strconv.Atoi(waitStr)
 	if err != nil {
@@ -180,7 +180,7 @@ func (b *BreakerAPI) SetWait(ctx *gin.Context) {
 		return
 	}
 
-	if wait < 3 || wait >= 10 {
+	if wait < 1 || wait >= 10 {
 		log.Printf("Invalid wait: %v", wait)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid wait"})
 		return

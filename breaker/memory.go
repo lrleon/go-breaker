@@ -37,7 +37,7 @@ func init() {
 	}
 }
 
-// Return true if the memory usage is above the threshold. The threshold is
+// MemoryOK Return true if the memory usage is above the threshold. The threshold is
 // calculated based on the memory limit of the container
 func (b *breaker) MemoryOK() bool {
 	var m runtime.MemStats

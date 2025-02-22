@@ -14,12 +14,14 @@ $url = "http://#{host}:#{port}/"
 
 def consult(endpoint_name)
   url = "#{$url}#{endpoint_name}"
+  puts "Requesting #{url}"
   response = HTTP.get(url)
   puts response.body
 end
 
 def set(endpoint_name, value)
   url = "#{$url}#{endpoint_name}/#{value}"
+  puts "Requesting #{url}"
   response = HTTP.get(url)
   puts response.body
 end
@@ -31,7 +33,7 @@ def request; consult('test') end
 
 def memory; consult('memory') end
 
-def latency; consult('latency') end
+def size; consult('size') end
 
 def latency_window_size; consult('latency_window_size') end
 
@@ -41,7 +43,7 @@ def wait_time; consult('wait') end
 
 def set_memory(memory) set('set_memory', memory) end
 
-def set_latency(latency) set('set_latency', latency) end
+def set_latency(size) set('set_latency', size) end
 
 def set_latency_window_size(window_size) set('set_latency_window_size', window_size) end
 

@@ -71,11 +71,11 @@ func main() {
 	router.GET("/latency_window_size", breakerAPI.GetLatencyWindowSize)
 	router.GET("/percentile", breakerAPI.GetPercentile)
 	router.GET("/wait", breakerAPI.GetWait)
-	router.GET("/set_memory", breakerAPI.SetMemory)
-	router.GET("/set_latency", breakerAPI.SetLatency)
-	router.GET("/set_latency_window_size", breakerAPI.SetLatencyWindowSize)
-	router.GET("/set_percentile", breakerAPI.SetPercentile)
-	router.GET("/set_wait", breakerAPI.SetWait)
+	router.GET("/set_memory/:threshold", breakerAPI.SetMemory)
+	router.GET("/set_latency/:threshold", breakerAPI.SetLatency)
+	router.GET("/set_latency_window_size/:size", breakerAPI.SetLatencyWindowSize)
+	router.GET("/set_percentile/:percentile", breakerAPI.SetPercentile)
+	router.GET("/set_wait/:wait", breakerAPI.SetWait)
 
 	fmt.Println("Starting server at port 8080")
 
