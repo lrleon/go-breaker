@@ -21,7 +21,7 @@ type Breaker interface {
 The `breaker` struct implements the `Breaker` interface and includes the following fields:
 
 - `mu`: A mutex to ensure thread-safe operations.
-- `config`: Configuration settings for the breaker.
+- `Config`: Configuration settings for the breaker.
 - `tripped`: A boolean indicating if the breaker is tripped.
 - `lastTripTime`: The last time the breaker was tripped.
 - `latencyWindow`: A window to track latencies.
@@ -33,7 +33,7 @@ The `breaker` struct implements the `Breaker` interface and includes the followi
 Creates a new breaker with the given configuration.
 
 ```go
-func NewBreaker(config Config) Breaker
+func NewBreaker(Config Config) Breaker
 ```
 
 ### Allow
@@ -89,7 +89,7 @@ import (
 )
 
 func main() {
-    config := breaker.Config{
+    Config := breaker.Config{
         MemoryThreshold:   0.85,
         LatencyThreshold:  600,
         LatencyWindowSize: 10,
@@ -97,7 +97,7 @@ func main() {
         WaitTime:          10,
     }
 
-    b := breaker.NewBreaker(config)
+    b := breaker.NewBreaker(Config)
 
     // Simulate an operation
     startTime := time.Now()

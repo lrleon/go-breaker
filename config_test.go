@@ -1,4 +1,4 @@
-package breaker
+package go_breaker
 
 import (
 	"reflect"

@@ -1,4 +1,4 @@
-package breaker
+package go_breaker
 
 import (
 	"github.com/BurntSushi/toml"
@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// Config This config ios read from a toml file
+// Config This Config ios read from a toml file
 type Config struct {
 	MemoryThreshold   float64 `toml:"memory_threshold"`    // Percentage of memory usage
 	LatencyThreshold  int64   `toml:"latency_threshold"`   // In milliseconds
@@ -15,7 +15,7 @@ type Config struct {
 	WaitTime          int     `toml:"wait_time"`           // Time to wait before reset latencyWindow in seconds
 }
 
-const configPath = "breaker-config.toml"
+const configPath = "breaker-Config.toml"
 
 var config *Config
 
@@ -47,18 +47,18 @@ func initConfig() {
 
 	config, err = LoadConfig(configPath)
 	if err != nil {
-		log.Printf("Error loading config file: %v", err)
-		log.Printf("Using default config")
+		log.Printf("Error loading Config file: %v", err)
+		log.Printf("Using default Config")
 		config = &Config{
 			MemoryThreshold:   80,
 			LatencyThreshold:  1500,
 			LatencyWindowSize: 64,
 			Percentile:        0.95,
 		}
-		// Save the default config to the file
+		// Save the default Config to the file
 		err := SaveConfig(configPath, config)
 		if err != nil {
-			log.Panicf("Error saving default config: %v", err)
+			log.Panicf("Error saving default Config: %v", err)
 		}
 	}
 
