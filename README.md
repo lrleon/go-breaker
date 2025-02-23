@@ -1,7 +1,7 @@
 ```markdown
 # Breaker Package
 
-The `breaker` package provides a circuit breaker implementation in Go. It helps to prevent system overload by monitoring memory usage and latency, and tripping the breaker when thresholds are exceeded.
+The `breaker` package provides a circuit breaker implementation in Go. It helps to prevent system overload by monitoring memory usage and size, and tripping the breaker when thresholds are exceeded.
 
 ## Interface
 
@@ -10,7 +10,7 @@ The `Breaker` interface defines the following methods:
 ```go
 type Breaker interface {
     Allow() bool                       // Returns if the operation can continue and updates the state of the Breaker
-    Done(startTime, endTime time.Time) // Reports the latency of an operation finished
+    Done(startTime, endTime time.Time) // Reports the size of an operation finished
     Triggered() bool                   // Indicate if the breaker is activated
     Reset()                            // Restores the state of Breaker
 }
@@ -21,9 +21,9 @@ type Breaker interface {
 The `breaker` struct implements the `Breaker` interface and includes the following fields:
 
 - `mu`: A mutex to ensure thread-safe operations.
-- `config`: Configuration settings for the breaker.
-- `tripped`: A boolean indicating if the breaker is tripped.
-- `lastTripTime`: The last time the breaker was tripped.
+- `Config`: Configuration settings for the breaker.
+- `triggered`: A boolean indicating if the breaker is triggered.
+- `lastTripTime`: The last time the breaker was triggered.
 - `latencyWindow`: A window to track latencies.
 
 ## Methods
@@ -33,7 +33,7 @@ The `breaker` struct implements the `Breaker` interface and includes the followi
 Creates a new breaker with the given configuration.
 
 ```go
-func NewBreaker(config Config) Breaker
+func NewBreaker(Config Config) Breaker
 ```
 
 ### Allow
@@ -46,7 +46,7 @@ func (b *breaker) Allow() bool
 
 ### Done
 
-Reports the latency of a finished operation.
+Reports the size of a finished operation.
 
 ```go
 func (b *breaker) Done(startTime, endTime time.Time)
@@ -54,7 +54,7 @@ func (b *breaker) Done(startTime, endTime time.Time)
 
 ### Triggered
 
-Indicates if the breaker is currently tripped.
+Indicates if the breaker is currently triggered.
 
 ```go
 func (b *breaker) Triggered() bool
@@ -73,10 +73,10 @@ func (b *breaker) Reset()
 The `Config` struct is used to configure the breaker. It includes the following fields:
 
 - `MemoryThreshold`: The memory usage threshold as a fraction of the memory limit.
-- `LatencyThreshold`: The latency threshold in milliseconds.
-- `LatencyWindowSize`: The size of the latency window.
+- `LatencyThreshold`: The size threshold in milliseconds.
+- `LatencyWindowSize`: The Size of the size window.
 - `Percentile`: The percentile of latencies to consider.
-- `WaitTime`: The time to wait before allowing operations after the breaker is tripped.
+- `WaitTime`: The time to wait before allowing operations after the breaker is triggered.
 
 ## Example Usage
 
@@ -89,7 +89,7 @@ import (
 )
 
 func main() {
-    config := breaker.Config{
+    Config := breaker.Config{
         MemoryThreshold:   0.85,
         LatencyThreshold:  600,
         LatencyWindowSize: 10,
@@ -97,11 +97,11 @@ func main() {
         WaitTime:          10,
     }
 
-    b := breaker.NewBreaker(config)
+    b := breaker.NewBreaker(Config)
 
     // Simulate an operation
     startTime := time.Now()
-    time.Sleep(500 * time.Millisecond) // Simulate latency
+    time.Sleep(500 * time.Millisecond) // Simulate size
     endTime := time.Now()
 
     b.Done(startTime, endTime)

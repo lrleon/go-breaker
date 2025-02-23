@@ -1,6 +1,7 @@
-package breaker
+package tests
 
 import (
+	"github.com/lrleon/go-breaker/breaker"
 	"reflect"
 	"testing"
 	"time"
@@ -36,12 +37,12 @@ func Test_latencyWindow_aboveThreshold(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lw := &latencyWindow{
-				values: tt.fields.values,
-				index:  tt.fields.index,
-				size:   tt.fields.size,
+			lw := &breaker.LatencyWindow{
+				Values: tt.fields.values,
+				Index:  tt.fields.index,
+				Size:   tt.fields.size,
 			}
-			if got := lw.aboveThreshold(tt.args.threshold); got != tt.want {
+			if got := lw.AboveThreshold(tt.args.threshold); got != tt.want {
 				t.Errorf("aboveThreshold() = %v, want %v", got, tt.want)
 			}
 		})
@@ -50,7 +51,7 @@ func Test_latencyWindow_aboveThreshold(t *testing.T) {
 
 func Test_latencyWindow_add(t *testing.T) {
 
-	lw := newLatencyWindow(10)
+	lw := breaker.NewLatencyWindow(10)
 	type fields struct {
 		values []int64
 		index  int
@@ -67,7 +68,7 @@ func Test_latencyWindow_add(t *testing.T) {
 		latency := time.Duration(i) * time.Millisecond
 		startTime := timeNow.Add(-latency)
 		endTime := timeNow
-		lw.add(startTime, endTime)
+		lw.Add(startTime, endTime)
 	}
 
 	tests := []struct {
@@ -90,18 +91,18 @@ func Test_latencyWindow_add(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lw := &latencyWindow{
-				values: tt.fields.values,
-				index:  tt.fields.index,
-				size:   tt.fields.size,
+			lw := &breaker.LatencyWindow{
+				Values: tt.fields.values,
+				Index:  tt.fields.index,
+				Size:   tt.fields.size,
 			}
-			lw.add(tt.args.startTime, tt.args.endTime)
+			lw.Add(tt.args.startTime, tt.args.endTime)
 		})
 	}
 
 	// print the 95th percentile
 	p := 0.95
-	percentile := lw.percentile(p)
+	percentile := lw.Percentile(p)
 	t.Logf("95th percentile: %d ms", percentile)
 }
 
@@ -135,12 +136,12 @@ func Test_latencyWindow_belowThreshold(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lw := &latencyWindow{
-				values: tt.fields.values,
-				index:  tt.fields.index,
-				size:   tt.fields.size,
+			lw := &breaker.LatencyWindow{
+				Values: tt.fields.values,
+				Index:  tt.fields.index,
+				Size:   tt.fields.size,
 			}
-			if got := lw.belowThreshold(tt.args.threshold); got != tt.want {
+			if got := lw.BelowThreshold(tt.args.threshold); got != tt.want {
 				t.Errorf("belowThreshold() = %v, want %v", got, tt.want)
 			}
 		})
@@ -177,12 +178,12 @@ func Test_latencyWindow_aboveThresholdLatencies(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lw := &latencyWindow{
-				values: tt.fields.values,
-				index:  tt.fields.index,
-				size:   tt.fields.size,
+			lw := &breaker.LatencyWindow{
+				Values: tt.fields.values,
+				Index:  tt.fields.index,
+				Size:   tt.fields.size,
 			}
-			if got := lw.aboveThresholdLatencies(tt.args.threshold); !reflect.DeepEqual(got, tt.want) {
+			if got := lw.AboveThresholdLatencies(tt.args.threshold); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("aboveThresholdLatencies() = %v, want %v", got, tt.want)
 			}
 		})
