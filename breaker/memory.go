@@ -21,7 +21,7 @@ func GetK8sMemoryLimit() (int64, error) {
 	return limit, nil
 }
 
-var MemoryLimit int64
+var MemoryLimit int64 // MemoryLimit is the memory limit of the container
 
 func init() {
 
@@ -43,7 +43,10 @@ func (b *breaker) MemoryOK() bool {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	return float64(m.Alloc) < float64(MemoryLimit)*b.config.MemoryThreshold
+	currMem := float64(m.Alloc)
+	memLimit := float64(MemoryLimit) * b.config.MemoryThreshold
+
+	return currMem < memLimit
 }
 
 // SetMemoryLimitFile Set the memory limit file for testing

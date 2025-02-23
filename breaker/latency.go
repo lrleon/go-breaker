@@ -18,14 +18,14 @@ func NewLatencyWindow(size int) *LatencyWindow {
 	}
 }
 
-// This function adds a new LatencyWindow measurement to the window and must run
+// Add This function adds a new LatencyWindow measurement to the window and must run
 // in a critical section
 func (lw *LatencyWindow) Add(startTime, endTime time.Time) {
 	lw.Values[lw.Index] = endTime.Sub(startTime).Milliseconds()
 	lw.Index = (lw.Index + 1) % lw.Size // Circular buffer
 }
 
-// This function returns the LatencyWindow percentile in milliseconds of the window
+// Percentile This function returns the LatencyWindow percentile in milliseconds of the window
 // and must run in a critical section
 func (lw *LatencyWindow) Percentile(p float64) int64 {
 	sorted := append([]int64{}, lw.Values...)
@@ -33,7 +33,7 @@ func (lw *LatencyWindow) Percentile(p float64) int64 {
 	return sorted[int(float64(len(sorted))*p)]
 }
 
-// Return a slice with the latencies above the threshold
+// AboveThresholdLatencies Return a slice with the latencies above the threshold
 func (lw *LatencyWindow) AboveThresholdLatencies(threshold int64) []int64 {
 
 	latencies := []int64{}
@@ -45,7 +45,7 @@ func (lw *LatencyWindow) AboveThresholdLatencies(threshold int64) []int64 {
 	return latencies
 }
 
-// Return true if the LatencyWindow is above the threshold
+// AboveThreshold Return true if the LatencyWindow is above the threshold
 func (lw *LatencyWindow) AboveThreshold(threshold int64) bool {
 	return lw.Percentile(0.99) > threshold
 }

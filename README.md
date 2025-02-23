@@ -22,8 +22,8 @@ The `breaker` struct implements the `Breaker` interface and includes the followi
 
 - `mu`: A mutex to ensure thread-safe operations.
 - `Config`: Configuration settings for the breaker.
-- `tripped`: A boolean indicating if the breaker is tripped.
-- `lastTripTime`: The last time the breaker was tripped.
+- `triggered`: A boolean indicating if the breaker is triggered.
+- `lastTripTime`: The last time the breaker was triggered.
 - `latencyWindow`: A window to track latencies.
 
 ## Methods
@@ -54,7 +54,7 @@ func (b *breaker) Done(startTime, endTime time.Time)
 
 ### Triggered
 
-Indicates if the breaker is currently tripped.
+Indicates if the breaker is currently triggered.
 
 ```go
 func (b *breaker) Triggered() bool
@@ -76,7 +76,7 @@ The `Config` struct is used to configure the breaker. It includes the following 
 - `LatencyThreshold`: The size threshold in milliseconds.
 - `LatencyWindowSize`: The Size of the size window.
 - `Percentile`: The percentile of latencies to consider.
-- `WaitTime`: The time to wait before allowing operations after the breaker is tripped.
+- `WaitTime`: The time to wait before allowing operations after the breaker is triggered.
 
 ## Example Usage
 
