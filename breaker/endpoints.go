@@ -171,7 +171,7 @@ func (b *BreakerAPI) GetPercentile(ctx *gin.Context) {
 
 func (b *BreakerAPI) SetWait(ctx *gin.Context) {
 
-	// error if wait is less than 1 seconds or greater or equal than 10 seconds
+	// error if wait is less than 1 second or greater or equal than 10 seconds
 	waitStr := ctx.Query("wait")
 	wait, err := strconv.Atoi(waitStr)
 	if err != nil {
@@ -205,4 +205,18 @@ func (b *BreakerAPI) GetWait(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	ctx.JSON(http.StatusOK, gin.H{"wait": b.Config.WaitTime})
+}
+
+func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
+	group := router.Group("/breaker")
+	group.GET("/memory", breakerAPI.GetMemory)
+	group.GET("/latency", breakerAPI.GetLatency)
+	group.GET("/latency_window_size", breakerAPI.GetLatencyWindowSize)
+	group.GET("/percentile", breakerAPI.GetPercentile)
+	group.GET("/wait", breakerAPI.GetWait)
+	group.GET("/set_memory", breakerAPI.SetMemory)
+	group.GET("/set_latency", breakerAPI.SetLatency)
+	group.GET("/set_latency_window_size", breakerAPI.SetLatencyWindowSize)
+	group.GET("/set_percentile", breakerAPI.SetPercentile)
+	group.GET("/set_wait", breakerAPI.SetWait)
 }

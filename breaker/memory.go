@@ -1,6 +1,7 @@
 package breaker
 
 import (
+	"bytes"
 	"log"
 	"os"
 	"runtime"
@@ -12,8 +13,10 @@ var MemoryLimitFile = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
 func GetK8sMemoryLimit() (int64, error) {
 	data, err := os.ReadFile(MemoryLimitFile)
 	if err != nil {
+		log.Printf("Error reading memory limit file: %v", err)
 		return 0, err
 	}
+	data = bytes.TrimSpace(data)
 	limit, err := strconv.ParseInt(string(data), 10, 64)
 	if err != nil {
 		return 0, err
@@ -33,6 +36,7 @@ func init() {
 	var err error
 	MemoryLimit, err = GetK8sMemoryLimit()
 	if err != nil {
+		log.Printf("Error getting memory limit: %v", err)
 		panic(err)
 	}
 }

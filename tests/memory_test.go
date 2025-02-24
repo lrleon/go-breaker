@@ -27,7 +27,7 @@ func TestK8SGetMemoryLimit(t *testing.T) {
 
 		}
 	}(file)
-	_, err = file.WriteString("536870912")
+	_, err = file.WriteString("536870912\n")
 	if err != nil {
 		return
 	} // 512 MB
