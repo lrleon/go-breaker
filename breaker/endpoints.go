@@ -18,7 +18,7 @@ func (b *BreakerAPI) SetMemory(ctx *gin.Context) {
 
 	// error if memory threshold is less than 0 or greater or equal
 	// than 100
-	thresholdStr := ctx.Query("threshold")
+	thresholdStr := ctx.Param("threshold")
 	threshold, err := strconv.Atoi(thresholdStr)
 	if err != nil {
 		log.Printf("Invalid memory threshold: %v", thresholdStr)
@@ -57,7 +57,7 @@ func (b *BreakerAPI) SetLatency(ctx *gin.Context) {
 
 	// error if a latency threshold is less than 5 ms or greater or equal
 	// than 5000 ms
-	thresholdStr := ctx.Query("threshold")
+	thresholdStr := ctx.Param("threshold")
 	threshold, err := strconv.Atoi(thresholdStr)
 	if err != nil {
 		log.Printf("Invalid latency threshold: %v", thresholdStr)
@@ -96,10 +96,10 @@ func (b *BreakerAPI) SetLatencyWindowSize(ctx *gin.Context) {
 
 	// error if size window Size is less than 11 or greater or equal
 	// than 1021
-	sizeStr := ctx.Query("size")
+	sizeStr := ctx.Param("size")
 	size, err := strconv.Atoi(sizeStr)
 	if err != nil {
-		log.Printf("Invalid size window Size: %v", sizeStr)
+		log.Printf("Invalid size window: %v", sizeStr)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid size window Size"})
 		return
 	}
@@ -134,7 +134,7 @@ func (b *BreakerAPI) GetLatencyWindowSize(ctx *gin.Context) {
 func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 
 	// error if percentile is less than 40 or greater than 99
-	percentileStr := ctx.Query("percentile")
+	percentileStr := ctx.Param("percentile")
 	percentile, err := strconv.ParseFloat(percentileStr, 64)
 	if err != nil {
 		log.Printf("Invalid percentile: %v", percentileStr)
@@ -172,7 +172,7 @@ func (b *BreakerAPI) GetPercentile(ctx *gin.Context) {
 func (b *BreakerAPI) SetWait(ctx *gin.Context) {
 
 	// error if wait is less than 1 second or greater or equal than 10 seconds
-	waitStr := ctx.Query("wait")
+	waitStr := ctx.Param("wait_time")
 	wait, err := strconv.Atoi(waitStr)
 	if err != nil {
 		log.Printf("Invalid wait: %v", waitStr)
@@ -214,9 +214,9 @@ func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 	group.GET("/latency_window_size", breakerAPI.GetLatencyWindowSize)
 	group.GET("/percentile", breakerAPI.GetPercentile)
 	group.GET("/wait", breakerAPI.GetWait)
-	group.GET("/set_memory", breakerAPI.SetMemory)
-	group.GET("/set_latency", breakerAPI.SetLatency)
-	group.GET("/set_latency_window_size", breakerAPI.SetLatencyWindowSize)
-	group.GET("/set_percentile", breakerAPI.SetPercentile)
-	group.GET("/set_wait", breakerAPI.SetWait)
+	group.GET("/set_memory/:threshold", breakerAPI.SetMemory)
+	group.GET("/set_latency/:threshold", breakerAPI.SetLatency)
+	group.GET("/set_latency_window_size/:size", breakerAPI.SetLatencyWindowSize)
+	group.GET("/set_percentile/:percentile", breakerAPI.SetPercentile)
+	group.GET("/set_wait/:wait_time", breakerAPI.SetWait)
 }

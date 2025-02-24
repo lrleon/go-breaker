@@ -10,7 +10,7 @@ require 'byebug'
 host = ARGV[0] || 'localhost'
 port = ARGV[1] || 8080
 
-$url = "http://#{host}:#{port}/"
+$url = "http://#{host}:#{port}/breaker/"
 
 def consult(endpoint_name)
   url = "#{$url}#{endpoint_name}"
@@ -39,8 +39,8 @@ def memory
   consult('memory')
 end
 
-def size
-  consult('size')
+def latency
+  consult('latency')
 end
 
 def latency_window_size
