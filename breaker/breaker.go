@@ -8,11 +8,12 @@ import (
 type Breaker interface {
 	Allow() bool                       // Returns if the operation can continue and updates the state of the Breaker
 	Done(startTime, endTime time.Time) // Reports the latency of an operation finished
-	TriggeredByLatencies() bool        // Indicate if the breaker is activated
+	TriggeredByLatencies() bool        // Indicate if the BreakerDriver is activated
 	Reset()                            // Restores the state of Breaker
+	LatenciesAboveThreshold(threshold int64) []int64
 }
 
-type breaker struct {
+type BreakerDriver struct {
 	mu            sync.Mutex
 	config        Config
 	triggered     bool
@@ -20,20 +21,20 @@ type breaker struct {
 	latencyWindow *LatencyWindow
 }
 
-func NewBreaker(config Config) Breaker {
-	return &breaker{
-		config:        config,
+func NewBreaker(config *Config) Breaker {
+	return &BreakerDriver{
+		config:        *config,
 		latencyWindow: NewLatencyWindow(config.LatencyWindowSize),
 	}
 }
 
 // Return true if the memory usage is above the threshold and the LatencyWindow
 // is below the threshold
-func (b *breaker) isHealthy() bool {
+func (b *BreakerDriver) isHealthy() bool {
 	return b.MemoryOK() && b.LatencyOK()
 }
 
-func (b *breaker) Allow() bool {
+func (b *BreakerDriver) Allow() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.triggered {
@@ -47,7 +48,7 @@ func (b *breaker) Allow() bool {
 	return b.MemoryOK()
 }
 
-func (b *breaker) Done(startTime, endTime time.Time) {
+func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -60,23 +61,23 @@ func (b *breaker) Done(startTime, endTime time.Time) {
 	}
 }
 
-// TriggeredByLatencies returns a boolean indicating if the breaker is currently triggered.
-// The breaker is triggered when both the memory usage is above the threshold
+// TriggeredByLatencies returns a boolean indicating if the BreakerDriver is currently triggered.
+// The BreakerDriver is triggered when both the memory usage is above the threshold
 // and the latency percentile is above the latency threshold.
-func (b *breaker) TriggeredByLatencies() bool {
+func (b *BreakerDriver) TriggeredByLatencies() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.triggered
 }
 
 // LatenciesAboveThreshold Return latencies above the threshold
-func (b *breaker) LatenciesAboveThreshold(threshold int64) []int64 {
+func (b *BreakerDriver) LatenciesAboveThreshold(threshold int64) []int64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.latencyWindow.AboveThresholdLatencies(threshold)
 }
 
-func (b *breaker) Reset() {
+func (b *BreakerDriver) Reset() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.triggered = false

@@ -55,6 +55,8 @@ def wait_time
   consult('wait')
 end
 
+def memory_usage; consult('memory_usage'); end
+
 def set_memory(memory)
   set('set_memory', memory)
 end
@@ -74,3 +76,5 @@ end
 def set_wait_time(wait_time)
   set('set_wait', wait_time)
 end
+
+def get_latencies(threshold); consult("latencies_above_threshold/#{threshold}"); end

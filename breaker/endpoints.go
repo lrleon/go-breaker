@@ -11,7 +11,15 @@ import (
 
 type BreakerAPI struct {
 	Config Config
+	Driver Breaker
 	lock   sync.Mutex
+}
+
+func NewBreakerAPI(config *Config) *BreakerAPI {
+	return &BreakerAPI{
+		Config: *config,
+		Driver: NewBreaker(config),
+	}
 }
 
 func (b *BreakerAPI) SetMemory(ctx *gin.Context) {
@@ -36,7 +44,7 @@ func (b *BreakerAPI) SetMemory(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.MemoryThreshold = float64(threshold)
-	err = SaveConfig("breaker-Config.toml", &b.Config)
+	err = SaveConfig("BreakerDriver-Config.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -75,7 +83,7 @@ func (b *BreakerAPI) SetLatency(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.LatencyThreshold = int64(threshold)
-	err = SaveConfig("breaker-Config.toml", &b.Config)
+	err = SaveConfig("BreakerDriver-Config.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -114,7 +122,7 @@ func (b *BreakerAPI) SetLatencyWindowSize(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.LatencyWindowSize = size
-	err = SaveConfig("breaker-Config.toml", &b.Config)
+	err = SaveConfig("BreakerDriver-Config.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -155,7 +163,7 @@ func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.Percentile = percentile / 100.0
-	err = SaveConfig("breaker-Config.toml", &b.Config)
+	err = SaveConfig("BreakerDriver-Config.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -193,7 +201,7 @@ func (b *BreakerAPI) SetWait(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.WaitTime = wait
-	err = SaveConfig("breaker-Config.toml", &b.Config)
+	err = SaveConfig("BreakerDriver-Config.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -215,8 +223,24 @@ func (b *BreakerAPI) GetMemoryUsage(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"memory_usage": MemoryUsage()})
 }
 
+func (b *BreakerAPI) LatenciesAboveThreshold(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	thresholdStr := ctx.Param("threshold")
+	threshold, err := strconv.Atoi(thresholdStr)
+	if err != nil {
+		log.Printf("Invalid latency threshold: %v", thresholdStr)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid latency threshold"})
+		return
+	}
+
+	latencies := b.Driver.LatenciesAboveThreshold(int64(threshold))
+	ctx.JSON(http.StatusOK, gin.H{"latencies": latencies})
+}
+
 func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
-	group := router.Group("/breaker")
+	group := router.Group("/BreakerDriver")
 	group.GET("/memory", breakerAPI.GetMemory)
 	group.GET("/latency", breakerAPI.GetLatency)
 	group.GET("/latency_window_size", breakerAPI.GetLatencyWindowSize)
@@ -228,4 +252,5 @@ func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 	group.GET("/set_percentile/:percentile", breakerAPI.SetPercentile)
 	group.GET("/set_wait/:wait_time", breakerAPI.SetWait)
 	group.GET("/memory_usage", breakerAPI.GetMemoryUsage)
+	group.GET("/latencies_above_threshold/:threshold", breakerAPI.LatenciesAboveThreshold)
 }

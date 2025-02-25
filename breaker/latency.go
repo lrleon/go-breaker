@@ -61,6 +61,6 @@ func (lw *LatencyWindow) BelowThreshold(threshold int64) bool {
 }
 
 // LatencyOK Return true if the LatencyWindow is OK
-func (b *breaker) LatencyOK() bool {
+func (b *BreakerDriver) LatencyOK() bool {
 	return b.latencyWindow.BelowThreshold(b.config.LatencyThreshold)
 }
