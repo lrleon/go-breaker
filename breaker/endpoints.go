@@ -146,7 +146,7 @@ func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 
 	// error if percentile is less than 40 or greater than 99
 	percentileStr := ctx.Param("percentile")
-	percentile, err := strconv.ParseFloat(percentileStr, 64)
+	percentile, err := strconv.Atoi(percentileStr)
 	if err != nil {
 		log.Printf("Invalid percentile: %v", percentileStr)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid percentile"})
