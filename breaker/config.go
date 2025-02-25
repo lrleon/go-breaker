@@ -15,7 +15,7 @@ type Config struct {
 	WaitTime          int     `toml:"wait_time"`           // Time to wait before reset LatencyWindow in seconds
 }
 
-const configPath = "breaker-Config.toml"
+const configPath = "BreakerDriver-Config.toml"
 
 var config *Config
 
