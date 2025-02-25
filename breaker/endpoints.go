@@ -162,7 +162,7 @@ func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	b.Config.Percentile = percentile / 100.0
+	b.Config.Percentile = float64(percentile / 100.0)
 	err = SaveConfig("BreakerDriver-Config.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
