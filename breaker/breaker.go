@@ -1,6 +1,7 @@
 package breaker
 
 import (
+	"log"
 	"sync"
 	"time"
 )
@@ -41,6 +42,7 @@ func (b *BreakerDriver) Allow() bool {
 		if time.Since(b.lastTripTime) > time.Duration(b.config.WaitTime)*time.Second &&
 			b.MemoryOK() {
 			b.triggered = false
+			log.Printf("BreakerDriver has been reset")
 		} else {
 			return false
 		}
@@ -58,6 +60,9 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	if latencyPercentile > b.config.LatencyThreshold || !memoryStatus {
 		b.triggered = true
 		b.lastTripTime = time.Now()
+		log.Printf("BreakerDriver triggered. Latency: %v, Memory: %v",
+			latencyPercentile, memoryStatus)
+		log.Printf("Retry after %v seconds", b.config.WaitTime)
 	}
 }
 
