@@ -41,6 +41,14 @@ func init() {
 	}
 }
 
+// MemoryUsage Return the current memory usage in MB
+func MemoryUsage() int64 {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	return int64(m.Alloc) / 1024 / 1024
+}
+
 // MemoryOK Return true if the memory usage is above the threshold. The threshold is
 // calculated based on the memory limit of the container
 func (b *breaker) MemoryOK() bool {
