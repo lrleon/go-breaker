@@ -22,8 +22,9 @@ func NewLatencyWindow(size int) *LatencyWindow {
 // Add This function adds a new LatencyWindow measurement to the window and must run
 // in a critical section
 func (lw *LatencyWindow) Add(startTime, endTime time.Time) {
+	n := len(lw.Values)
 	lw.Values[lw.Index] = endTime.Sub(startTime).Milliseconds()
-	lw.Index = (lw.Index + 1) % lw.Size // Circular buffer
+	lw.Index = (lw.Index + 1) % n // Circular buffer
 	lw.NeedToSort = true
 }
 
