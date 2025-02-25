@@ -240,7 +240,7 @@ func (b *BreakerAPI) LatenciesAboveThreshold(ctx *gin.Context) {
 }
 
 func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
-	group := router.Group("/BreakerDriver")
+	group := router.Group("/breaker")
 	group.GET("/memory", breakerAPI.GetMemory)
 	group.GET("/latency", breakerAPI.GetLatency)
 	group.GET("/latency_window_size", breakerAPI.GetLatencyWindowSize)
