@@ -69,6 +69,13 @@ func (b *breaker) TriggeredByLatencies() bool {
 	return b.triggered
 }
 
+// LatenciesAboveThreshold Return latencies above the threshold
+func (b *breaker) LatenciesAboveThreshold(threshold int64) []int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.latencyWindow.AboveThresholdLatencies(threshold)
+}
+
 func (b *breaker) Reset() {
 	b.mu.Lock()
 	defer b.mu.Unlock()

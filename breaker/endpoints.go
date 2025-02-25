@@ -131,6 +131,9 @@ func (b *BreakerAPI) GetLatencyWindowSize(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"latency": b.Config.LatencyWindowSize})
 }
 
+const MinPercentile = 5
+const MaxPercentile = 99
+
 func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 
 	// error if percentile is less than 40 or greater than 99
@@ -142,8 +145,8 @@ func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 		return
 	}
 
-	if percentile < 40 || percentile > 99 {
-		log.Printf("Invalid percentile: %v", percentile)
+	if percentile < MinPercentile || percentile > MinPercentile {
+		log.Printf("Invalid percentile: %v (must be in[%d, %d])", percentile, MinPercentile, MaxPercentile)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid percentile"})
 		return
 	}
@@ -151,7 +154,7 @@ func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	b.Config.Percentile = percentile
+	b.Config.Percentile = percentile / 100.0
 	err = SaveConfig("breaker-Config.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
@@ -207,6 +210,11 @@ func (b *BreakerAPI) GetWait(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"wait": b.Config.WaitTime})
 }
 
+// GetMemoryUsage Return the most recent memory usage
+func (b *BreakerAPI) GetMemoryUsage(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, gin.H{"memory_usage": MemoryUsage()})
+}
+
 func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 	group := router.Group("/breaker")
 	group.GET("/memory", breakerAPI.GetMemory)
@@ -219,4 +227,5 @@ func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 	group.GET("/set_latency_window_size/:size", breakerAPI.SetLatencyWindowSize)
 	group.GET("/set_percentile/:percentile", breakerAPI.SetPercentile)
 	group.GET("/set_wait/:wait_time", breakerAPI.SetWait)
+	group.GET("/memory_usage", breakerAPI.GetMemoryUsage)
 }
