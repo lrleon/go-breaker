@@ -12,7 +12,7 @@ func Test_breaker_should_not_trigger_if_latencies_are_below_threshold(t *testing
 
 	breaker.MemoryLimit = 512 * 1024 * 1024 // 512 MB
 
-	b := breaker.NewBreaker(breaker.Config{
+	b := breaker.NewBreaker(&breaker.Config{
 		MemoryThreshold:   0.85,
 		LatencyThreshold:  600,
 		LatencyWindowSize: 10,
@@ -45,7 +45,7 @@ func Test_breaker_should_trigger_if_latencies_are_above_threshold(t *testing.T) 
 
 	breaker.MemoryLimit = 512 * 1024 * 1024 // 512 MB
 
-	b := breaker.NewBreaker(breaker.Config{
+	b := breaker.NewBreaker(&breaker.Config{
 		MemoryThreshold:   0.85,
 		LatencyThreshold:  600,
 		LatencyWindowSize: 10,
@@ -72,7 +72,7 @@ func Test_breaker_should_trigger_if_memory_is_above_threshold(t *testing.T) {
 
 	breaker.MemoryLimit = 512 * 1024 * 1024 // 512 MB
 
-	b := breaker.NewBreaker(breaker.Config{
+	b := breaker.NewBreaker(&breaker.Config{
 		MemoryThreshold:   0.5,
 		LatencyThreshold:  600,
 		LatencyWindowSize: 10,
