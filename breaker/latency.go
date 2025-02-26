@@ -28,6 +28,13 @@ func (lw *LatencyWindow) Add(startTime, endTime time.Time) {
 	lw.NeedToSort = true
 }
 
+// Reset This function resets the LatencyWindow and must run in a critical section
+func (lw *LatencyWindow) Reset() {
+	lw.Values = make([]int64, lw.Size)
+	lw.Index = 0
+	lw.NeedToSort = false
+}
+
 // Percentile This function returns the LatencyWindow percentile in milliseconds of the window
 // and must run in a critical section
 func (lw *LatencyWindow) Percentile(p float64) int64 {

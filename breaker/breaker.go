@@ -12,6 +12,11 @@ type Breaker interface {
 	TriggeredByLatencies() bool        // Indicate if the BreakerDriver is activated
 	Reset()                            // Restores the state of Breaker
 	LatenciesAboveThreshold(threshold int64) []int64
+	MemoryOK() bool
+	LatencyOK() bool
+	IsEnabled() bool
+	Disable()
+	Enable()
 }
 
 type BreakerDriver struct {
@@ -20,12 +25,30 @@ type BreakerDriver struct {
 	triggered     bool
 	lastTripTime  time.Time
 	latencyWindow *LatencyWindow
+	enabled       bool
+}
+
+func (b *BreakerDriver) IsEnabled() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.enabled
+}
+
+func (b *BreakerDriver) Disable() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.enabled = false
+}
+
+func (b *BreakerDriver) Enable() {
+	b.Reset()
 }
 
 func NewBreaker(config *Config) Breaker {
 	return &BreakerDriver{
 		config:        *config,
 		latencyWindow: NewLatencyWindow(config.LatencyWindowSize),
+		enabled:       true,
 	}
 }
 
@@ -38,6 +61,11 @@ func (b *BreakerDriver) isHealthy() bool {
 func (b *BreakerDriver) Allow() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	if !b.enabled {
+		return true
+	}
+
 	if b.triggered {
 		if time.Since(b.lastTripTime) > time.Duration(b.config.WaitTime)*time.Second &&
 			b.MemoryOK() {
@@ -53,6 +81,10 @@ func (b *BreakerDriver) Allow() bool {
 func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	if !b.enabled {
+		return
+	}
 
 	b.latencyWindow.Add(startTime, endTime)
 	latencyPercentile := b.latencyWindow.Percentile(b.config.Percentile)
@@ -86,4 +118,7 @@ func (b *BreakerDriver) Reset() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.triggered = false
+	b.lastTripTime = time.Time{}
+	b.enabled = true
+	b.latencyWindow.Reset()
 }

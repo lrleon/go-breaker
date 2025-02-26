@@ -22,6 +22,26 @@ func NewBreakerAPI(config *Config) *BreakerAPI {
 	}
 }
 
+func (b *BreakerAPI) SetEnabled(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	b.Driver.Enable()
+	ctx.JSON(http.StatusOK, gin.H{"message": "Breaker enabled"})
+}
+
+func (b *BreakerAPI) SetDisabled(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	b.Driver.Disable()
+	ctx.JSON(http.StatusOK, gin.H{"message": "Breaker disabled"})
+}
+
+func (b *BreakerAPI) GetEnabled(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+	ctx.JSON(http.StatusOK, gin.H{"enabled": b.Driver.IsEnabled()})
+}
+
 func (b *BreakerAPI) SetMemory(ctx *gin.Context) {
 
 	// error if memory threshold is less than 0 or greater or equal
@@ -239,8 +259,20 @@ func (b *BreakerAPI) LatenciesAboveThreshold(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"latencies": latencies})
 }
 
+func (b *BreakerAPI) GetMemoryLimit(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, gin.H{"memory_limit": MemoryLimit})
+}
+
+func (b *BreakerAPI) Reset(ctx *gin.Context) {
+	b.Driver.Reset()
+	ctx.JSON(http.StatusOK, gin.H{"message": "Breaker reset"})
+}
+
 func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 	group := router.Group("/breaker")
+	group.GET("/enabled", breakerAPI.GetEnabled)
+	group.GET("/disable", breakerAPI.SetDisabled)
+	group.GET("/enable", breakerAPI.SetEnabled)
 	group.GET("/memory", breakerAPI.GetMemory)
 	group.GET("/latency", breakerAPI.GetLatency)
 	group.GET("/latency_window_size", breakerAPI.GetLatencyWindowSize)
@@ -253,4 +285,6 @@ func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 	group.GET("/set_wait/:wait_time", breakerAPI.SetWait)
 	group.GET("/memory_usage", breakerAPI.GetMemoryUsage)
 	group.GET("/latencies_above_threshold/:threshold", breakerAPI.LatenciesAboveThreshold)
+	group.GET("/memory_limit", breakerAPI.GetMemoryLimit)
+	group.GET("/reset", breakerAPI.Reset)
 }
