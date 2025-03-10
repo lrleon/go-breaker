@@ -159,6 +159,11 @@ func (b *BreakerAPI) GetLatencyWindowSize(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"latency": b.Config.LatencyWindowSize})
 }
 
+// TODO: instead of using a slice to ve sorted for getting the percentile,
+// use binary search tree with ranges
+
+// TODO: use float for the percentiles
+
 const MinPercentile = 5
 const MaxPercentile = 99
 
@@ -173,7 +178,7 @@ func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 		return
 	}
 
-	if percentile < MinPercentile || percentile > MinPercentile {
+	if percentile < MinPercentile || percentile > MaxPercentile {
 		log.Printf("Invalid percentile: %v (must be in[%d, %d])", percentile, MinPercentile, MaxPercentile)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid percentile"})
 		return

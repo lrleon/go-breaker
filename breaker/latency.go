@@ -38,12 +38,10 @@ func (lw *LatencyWindow) Reset() {
 // Percentile This function returns the LatencyWindow percentile in milliseconds of the window
 // and must run in a critical section
 func (lw *LatencyWindow) Percentile(p float64) int64 {
-	if lw.NeedToSort {
-		sorted := append([]int64{}, lw.Values...)
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-		return sorted[int(float64(len(sorted))*p)]
-	}
-	return lw.Values[int(float64(len(lw.Values))*p)]
+
+	sorted := append([]int64{}, lw.Values...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	return sorted[int(float64(len(sorted))*p)]
 }
 
 // AboveThresholdLatencies Return a slice with the latencies above the threshold
