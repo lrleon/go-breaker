@@ -164,14 +164,16 @@ func (b *BreakerAPI) GetLatencyWindowSize(ctx *gin.Context) {
 
 // TODO: use float for the percentiles
 
-const MinPercentile = 5
-const MaxPercentile = 99
+const MinPercentile = 1.0
+const MaxPercentile = 99.99999999999999
 
 func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 
 	// error if percentile is less than 40 or greater than 99
 	percentileStr := ctx.Param("percentile")
-	percentile, err := strconv.Atoi(percentileStr)
+
+	// percentileStr contains a float in (0, 100) with can contain decimals
+	percentile, err := strconv.ParseFloat(percentileStr, 64)
 	if err != nil {
 		log.Printf("Invalid percentile: %v", percentileStr)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid percentile"})
@@ -179,15 +181,17 @@ func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 	}
 
 	if percentile < MinPercentile || percentile > MaxPercentile {
-		log.Printf("Invalid percentile: %v (must be in[%d, %d])", percentile, MinPercentile, MaxPercentile)
+		log.Printf("Invalid percentile: %v (must be in[%f, %f])", percentile, MinPercentile, MaxPercentile)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid percentile"})
 		return
 	}
 
+	// percentile is an integer representing the fractional part of
+
 	b.lock.Lock()
 	defer b.lock.Unlock()
 
-	b.Config.Percentile = float64(percentile / 100.0)
+	b.Config.Percentile = percentile / 100.0
 	err = SaveConfig("BreakerDriver-Config.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
