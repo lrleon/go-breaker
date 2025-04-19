@@ -5,50 +5,89 @@ import (
 	"time"
 )
 
+// LatencyRecord stores a latency along with its timestamp
+type LatencyRecord struct {
+	Value     int64
+	Timestamp time.Time
+}
+
 type LatencyWindow struct {
-	Values     []int64
-	Index      int
-	Size       int
-	NeedToSort bool
+	Records       []LatencyRecord
+	Index         int
+	Size          int
+	NeedToSort    bool
+	MaxAgeMinutes int // New parameter: maximum age in minutes to consider a latency valid
 }
 
 func NewLatencyWindow(size int) *LatencyWindow {
 	return &LatencyWindow{
-		Values: make([]int64, size),
-		Size:   size,
+		Records:       make([]LatencyRecord, size),
+		Size:          size,
+		MaxAgeMinutes: 5, // Default: 5 minutes
 	}
 }
 
 // Add This function adds a new LatencyWindow measurement to the window and must run
 // in a critical section
 func (lw *LatencyWindow) Add(startTime, endTime time.Time) {
-	n := len(lw.Values)
-	lw.Values[lw.Index] = endTime.Sub(startTime).Milliseconds()
+	n := len(lw.Records)
+	lw.Records[lw.Index] = LatencyRecord{
+		Value:     endTime.Sub(startTime).Milliseconds(),
+		Timestamp: endTime,
+	}
 	lw.Index = (lw.Index + 1) % n // Circular buffer
 	lw.NeedToSort = true
 }
 
 // Reset This function resets the LatencyWindow and must run in a critical section
 func (lw *LatencyWindow) Reset() {
-	lw.Values = make([]int64, lw.Size)
+	lw.Records = make([]LatencyRecord, lw.Size)
 	lw.Index = 0
 	lw.NeedToSort = false
+}
+
+// GetRecentLatencies returns only latencies within the configured time period
+func (lw *LatencyWindow) GetRecentLatencies() []int64 {
+	cutoffTime := time.Now().Add(-time.Duration(lw.MaxAgeMinutes) * time.Minute)
+	var recentValues []int64
+
+	for _, record := range lw.Records {
+		// Only consider records with valid timestamps (not zero time) and recent ones
+		if !record.Timestamp.IsZero() && record.Timestamp.After(cutoffTime) {
+			recentValues = append(recentValues, record.Value)
+		}
+	}
+
+	return recentValues
 }
 
 // Percentile This function returns the LatencyWindow percentile in milliseconds of the window
 // and must run in a critical section
 func (lw *LatencyWindow) Percentile(p float64) int64 {
+	recentValues := lw.GetRecentLatencies()
 
-	sorted := append([]int64{}, lw.Values...)
+	// If there are no recent values, return 0
+	if len(recentValues) == 0 {
+		return 0
+	}
+
+	sorted := append([]int64{}, recentValues...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-	return sorted[int(float64(len(sorted))*p)]
+
+	idx := int(float64(len(sorted)) * p)
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+
+	return sorted[idx]
 }
 
 // AboveThresholdLatencies Return a slice with the latencies above the threshold
 func (lw *LatencyWindow) AboveThresholdLatencies(threshold int64) []int64 {
-
+	recentValues := lw.GetRecentLatencies()
 	latencies := []int64{}
-	for _, latency := range lw.Values {
+
+	for _, latency := range recentValues {
 		if latency > threshold {
 			latencies = append(latencies, latency)
 		}

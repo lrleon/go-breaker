@@ -45,9 +45,17 @@ func (b *BreakerDriver) Enable() {
 }
 
 func NewBreaker(config *Config) Breaker {
+	lw := NewLatencyWindow(config.LatencyWindowSize)
+
+	// Configure the maximum latency time using the configuration value
+	// If not configured, it will use the default value (5 minutes)
+	if config.MaxLatencyAgeMinutes > 0 {
+		lw.MaxAgeMinutes = config.MaxLatencyAgeMinutes
+	}
+
 	return &BreakerDriver{
 		config:        *config,
-		latencyWindow: NewLatencyWindow(config.LatencyWindowSize),
+		latencyWindow: lw,
 		enabled:       true,
 	}
 }
