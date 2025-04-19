@@ -16,14 +16,14 @@ type LatencyWindow struct {
 	Index         int
 	Size          int
 	NeedToSort    bool
-	MaxAgeMinutes int // New parameter: maximum age in minutes to consider a latency valid
+	MaxAgeSeconds int // Maximum age in seconds to consider a latency valid
 }
 
 func NewLatencyWindow(size int) *LatencyWindow {
 	return &LatencyWindow{
 		Records:       make([]LatencyRecord, size),
 		Size:          size,
-		MaxAgeMinutes: 5, // Default: 5 minutes
+		MaxAgeSeconds: 300, // Default: 5 minutes (300 seconds)
 	}
 }
 
@@ -48,7 +48,7 @@ func (lw *LatencyWindow) Reset() {
 
 // GetRecentLatencies returns only latencies within the configured time period
 func (lw *LatencyWindow) GetRecentLatencies() []int64 {
-	cutoffTime := time.Now().Add(-time.Duration(lw.MaxAgeMinutes) * time.Minute)
+	cutoffTime := time.Now().Add(-time.Duration(lw.MaxAgeSeconds) * time.Second)
 	var recentValues []int64
 
 	for _, record := range lw.Records {
@@ -85,7 +85,7 @@ func (lw *LatencyWindow) Percentile(p float64) int64 {
 // AboveThresholdLatencies Return a slice with the latencies above the threshold
 func (lw *LatencyWindow) AboveThresholdLatencies(threshold int64) []int64 {
 	recentValues := lw.GetRecentLatencies()
-	latencies := []int64{}
+	var latencies []int64
 
 	for _, latency := range recentValues {
 		if latency > threshold {

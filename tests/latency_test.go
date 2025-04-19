@@ -93,8 +93,8 @@ func Test_latencyWindow_aboveThresholdLatencies(t *testing.T) {
 func Test_latencyWindow_expiration(t *testing.T) {
 	lw := breaker.NewLatencyWindow(10)
 
-	// Configure to only consider latencies from the last 5 minutes
-	lw.MaxAgeMinutes = 5
+	// Configure to only consider latencies from the last 5 minutes (300 seconds)
+	lw.MaxAgeSeconds = 300
 
 	now := time.Now()
 
@@ -127,7 +127,7 @@ func Test_latencyWindow_expiration(t *testing.T) {
 	// Create a new window with the same parameters but that considers latencies
 	// as if we were in the future
 	lwFuture := breaker.NewLatencyWindow(10)
-	lwFuture.MaxAgeMinutes = 5
+	lwFuture.MaxAgeSeconds = 300
 
 	// Add latencies with "future" timestamps
 	futureLats := []int64{150, 250, 350}

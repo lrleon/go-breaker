@@ -47,10 +47,10 @@ func (b *BreakerDriver) Enable() {
 func NewBreaker(config *Config) Breaker {
 	lw := NewLatencyWindow(config.LatencyWindowSize)
 
-	// Configure the maximum latency time using the configuration value
-	// If not configured, it will use the default value (5 minutes)
-	if config.MaxLatencyAgeMinutes > 0 {
-		lw.MaxAgeMinutes = config.MaxLatencyAgeMinutes
+	// Use the WaitTime value (in seconds) as the maximum age for latencies
+	// This means latencies older than the circuit breaker wait time will not be considered
+	if config.WaitTime > 0 {
+		lw.MaxAgeSeconds = config.WaitTime
 	}
 
 	return &BreakerDriver{
@@ -83,6 +83,7 @@ func (b *BreakerDriver) Allow() bool {
 			return false
 		}
 	}
+
 	return b.MemoryOK()
 }
 
