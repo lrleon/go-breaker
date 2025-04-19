@@ -98,11 +98,46 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	b.latencyWindow.Add(startTime, endTime)
 	latencyPercentile := b.latencyWindow.Percentile(b.config.Percentile)
 	memoryStatus := b.MemoryOK()
-	if latencyPercentile > b.config.LatencyThreshold || !memoryStatus {
+
+	// Check if latency is above threshold
+	latencyAboveThreshold := latencyPercentile > b.config.LatencyThreshold
+
+	// Logging for debugging
+	log.Printf("Current latency percentile: %v, Threshold: %v, Above threshold: %v",
+		latencyPercentile, b.config.LatencyThreshold, latencyAboveThreshold)
+
+	// Determine whether to trigger the breaker
+	shouldTrigger := false
+
+	// If there's a memory issue, always trigger
+	if !memoryStatus {
+		shouldTrigger = true
+	}
+
+	// For latency issues, check if we need to consider trend analysis
+	if latencyAboveThreshold {
+		if b.config.TrendAnalysisEnabled {
+			// Only trigger if there's also a positive trend in latencies
+			hasTrend := b.latencyWindow.HasPositiveTrend(b.config.TrendAnalysisMinSampleCount)
+			log.Printf("Trend analysis enabled. Positive trend detected: %v", hasTrend)
+
+			if hasTrend {
+				log.Printf("Breaker triggered: Latency above threshold AND positive trend detected")
+				shouldTrigger = true
+			} else {
+				log.Printf("Latency above threshold but NO positive trend. Not triggering breaker.")
+			}
+		} else {
+			// No trend analysis, trigger based on threshold only
+			shouldTrigger = true
+		}
+	}
+
+	if shouldTrigger {
 		b.triggered = true
 		b.lastTripTime = time.Now()
-		log.Printf("BreakerDriver triggered. Latency: %v, Memory: %v",
-			latencyPercentile, memoryStatus)
+		log.Printf("BreakerDriver triggered. Latency: %v, Memory: %v, TrendAnalysis: %v",
+			latencyPercentile, memoryStatus, b.config.TrendAnalysisEnabled)
 		log.Printf("Retry after %v seconds", b.config.WaitTime)
 	}
 }
@@ -130,4 +165,9 @@ func (b *BreakerDriver) Reset() {
 	b.lastTripTime = time.Time{}
 	b.enabled = true
 	b.latencyWindow.Reset()
+}
+
+// LatencyOK Return true if the LatencyWindow is OK
+func (b *BreakerDriver) LatencyOK() bool {
+	return b.latencyWindow.BelowThreshold(b.config.LatencyThreshold)
 }

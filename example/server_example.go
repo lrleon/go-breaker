@@ -29,7 +29,7 @@ var breakerAPI = cb.BreakerAPI{
 // Create a new breaker
 var ApiBreaker = cb.NewBreaker(config)
 
-func test_endpoint(ctx *gin.Context) {
+func testEndpoint(ctx *gin.Context) {
 
 	if !ApiBreaker.Allow() {
 		ctx.JSON(http.StatusTooManyRequests, gin.H{"error": "Service unavailable"})
@@ -64,7 +64,7 @@ func main() {
 
 	// Set endpoints, including the breaker endpoints
 	router := gin.Default()
-	router.GET("/test", test_endpoint)
+	router.GET("/test", testEndpoint)
 	router.POST("/set_delay", set_delay)
 	router.GET("/memory", breakerAPI.GetMemory)
 	router.GET("/latency", breakerAPI.GetLatency)

@@ -10,6 +10,19 @@ import (
 
 var MemoryLimitFile = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
 
+// Variables for testing only
+var (
+	memoryOverride      bool
+	memoryOverrideValue bool
+)
+
+// SetMemoryOK is used only for testing to override the memory check
+// This allows tests to control whether memory is considered OK
+func SetMemoryOK(b *BreakerDriver, value bool) {
+	memoryOverride = true
+	memoryOverrideValue = value
+}
+
 func GetK8sMemoryLimit() (int64, error) {
 	data, err := os.ReadFile(MemoryLimitFile)
 	if err != nil {
@@ -52,6 +65,11 @@ func MemoryUsage() int64 {
 // MemoryOK Return true if the memory usage is above the threshold. The threshold is
 // calculated based on the memory limit of the container
 func (b *BreakerDriver) MemoryOK() bool {
+	// For testing purposes
+	if memoryOverride {
+		return memoryOverrideValue
+	}
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 

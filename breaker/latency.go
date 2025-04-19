@@ -61,6 +61,70 @@ func (lw *LatencyWindow) GetRecentLatencies() []int64 {
 	return recentValues
 }
 
+// GetRecentTimeOrderedLatencies returns latencies ordered by timestamp (oldest first)
+func (lw *LatencyWindow) GetRecentTimeOrderedLatencies() []LatencyRecord {
+	cutoffTime := time.Now().Add(-time.Duration(lw.MaxAgeSeconds) * time.Second)
+	var recentRecords []LatencyRecord
+
+	for _, record := range lw.Records {
+		// Only consider records with valid timestamps (not zero time) and recent ones
+		if !record.Timestamp.IsZero() && record.Timestamp.After(cutoffTime) {
+			recentRecords = append(recentRecords, record)
+		}
+	}
+
+	// Sort by timestamp (oldest first)
+	sort.Slice(recentRecords, func(i, j int) bool {
+		return recentRecords[i].Timestamp.Before(recentRecords[j].Timestamp)
+	})
+
+	return recentRecords
+}
+
+// HasPositiveTrend checks if the latency has an upward trend
+// Returns true if the trend is positive (latencies increasing), false otherwise
+// minSampleCount specifies the minimum number of samples required for trend analysis
+func (lw *LatencyWindow) HasPositiveTrend(minSampleCount int) bool {
+	orderedRecords := lw.GetRecentTimeOrderedLatencies()
+
+	// Need at least minSampleCount samples for meaningful trend analysis
+	if len(orderedRecords) < minSampleCount {
+		return false
+	}
+
+	// Use a simple linear regression slope calculation
+	n := float64(len(orderedRecords))
+	sumX := float64(0)
+	sumY := float64(0)
+	sumXY := float64(0)
+	sumX2 := float64(0)
+
+	// Use timestamps as X values (convert to float64 seconds since epoch)
+	// and latency values as Y values
+	for i, record := range orderedRecords {
+		// X values: use sequential indices for simplicity
+		x := float64(i)
+		y := float64(record.Value)
+
+		sumX += x
+		sumY += y
+		sumXY += x * y
+		sumX2 += x * x
+	}
+
+	// Calculate slope of the trend line
+	// slope = (n*sum(xy) - sum(x)*sum(y)) / (n*sum(x^2) - sum(x)^2)
+	denominator := n*sumX2 - sumX*sumX
+	if denominator == 0 {
+		return false // Avoid division by zero
+	}
+
+	slope := (n*sumXY - sumX*sumY) / denominator
+
+	// Positive slope indicates increasing latencies (positive trend)
+	return slope > 0
+}
+
 // Percentile This function returns the LatencyWindow percentile in milliseconds of the window
 // and must run in a critical section
 func (lw *LatencyWindow) Percentile(p float64) int64 {
@@ -103,9 +167,4 @@ func (lw *LatencyWindow) AboveThreshold(threshold int64) bool {
 // BelowThreshold Return true if the LatencyWindow is below the threshold
 func (lw *LatencyWindow) BelowThreshold(threshold int64) bool {
 	return lw.Percentile(0.99) < threshold
-}
-
-// LatencyOK Return true if the LatencyWindow is OK
-func (b *BreakerDriver) LatencyOK() bool {
-	return b.latencyWindow.BelowThreshold(b.config.LatencyThreshold)
 }
