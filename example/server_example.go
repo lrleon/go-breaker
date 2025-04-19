@@ -27,7 +27,7 @@ var breakerAPI = cb.BreakerAPI{
 }
 
 // Create a new breaker
-var ApiBreaker = cb.NewBreaker(*config)
+var ApiBreaker = cb.NewBreaker(config)
 
 func test_endpoint(ctx *gin.Context) {
 
@@ -65,17 +65,17 @@ func main() {
 	// Set endpoints, including the breaker endpoints
 	router := gin.Default()
 	router.GET("/test", test_endpoint)
-	router.GET("/set_delay", set_delay)
+	router.POST("/set_delay", set_delay)
 	router.GET("/memory", breakerAPI.GetMemory)
 	router.GET("/latency", breakerAPI.GetLatency)
 	router.GET("/latency_window_size", breakerAPI.GetLatencyWindowSize)
 	router.GET("/percentile", breakerAPI.GetPercentile)
 	router.GET("/wait", breakerAPI.GetWait)
-	router.GET("/set_memory/:threshold", breakerAPI.SetMemory)
-	router.GET("/set_latency/:threshold", breakerAPI.SetLatency)
-	router.GET("/set_latency_window_size/:size", breakerAPI.SetLatencyWindowSize)
-	router.GET("/set_percentile/:percentile", breakerAPI.SetPercentile)
-	router.GET("/set_wait/:wait", breakerAPI.SetWait)
+	router.POST("/set_memory/:threshold", breakerAPI.SetMemory)
+	router.POST("/set_latency/:threshold", breakerAPI.SetLatency)
+	router.POST("/set_latency_window_size/:size", breakerAPI.SetLatencyWindowSize)
+	router.POST("/set_percentile/:percentile", breakerAPI.SetPercentile)
+	router.POST("/set_wait/:wait", breakerAPI.SetWait)
 
 	fmt.Println("Starting server at port 8080")
 
