@@ -1,0 +1,126 @@
+# Gateway Multicaster Configuration for go-breaker
+
+## Paste this configuration in the config.toml file
+# GET Endpoints
+
+[[endpoints]]
+name = "Get Memory Threshold"
+path = "/breaker/memory"
+method = "GET"
+description = "Get the current memory threshold percentage"
+
+[[endpoints]]
+name = "Get Latency Threshold"
+path = "/breaker/latency"
+method = "GET"
+description = "Get the current latency threshold in milliseconds"
+
+[[endpoints]]
+name = "Get Latency Window Size"
+path = "/breaker/latency_window_size"
+method = "GET"
+description = "Get the current latency window size"
+
+[[endpoints]]
+name = "Get Percentile"
+path = "/breaker/percentile"
+method = "GET"
+description = "Get the current percentile value used for latency calculation"
+
+[[endpoints]]
+name = "Get Wait Time"
+path = "/breaker/wait"
+method = "GET"
+description = "Get the current wait time in seconds before retrying after circuit is open"
+
+[[endpoints]]
+name = "Test Endpoint"
+path = "/test"
+method = "GET"
+description = "Test endpoint that uses the breaker for protection"
+
+# POST Endpoints
+
+[[endpoints]]
+name = "Set Memory Threshold"
+path = "/breaker/set_memory"
+method = "POST"
+description = "Set the memory threshold percentage"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "threshold": "number"
+}
+'''
+
+[[endpoints]]
+name = "Set Latency Threshold"
+path = "/breaker/set_latency"
+method = "POST"
+description = "Set the latency threshold in milliseconds"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "threshold": "number"
+}
+'''
+
+[[endpoints]]
+name = "Set Latency Window Size"
+path = "/breaker/set_latency_window_size"
+method = "POST"
+description = "Set the latency window size"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "size": "number"
+}
+'''
+
+[[endpoints]]
+name = "Set Percentile"
+path = "/breaker/set_percentile"
+method = "POST"
+description = "Set the percentile value for latency calculation"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "percentile": "number"
+}
+'''
+
+[[endpoints]]
+name = "Set Wait Time"
+path = "/breaker/set_wait"
+method = "POST"
+description = "Set the wait time in seconds before retrying after circuit is open"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "wait_time": "number"
+}
+'''
+
+[[endpoints]]
+name = "Set Delay"
+path = "/set_delay"
+method = "POST"
+description = "Set the delay for the test endpoint in milliseconds"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "delay": "string"
+}
+'''

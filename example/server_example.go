@@ -22,12 +22,15 @@ var config = &cb.Config{
 	Percentile:        0.95,
 }
 
-var breakerAPI = cb.BreakerAPI{
-	Config: *config,
-}
+var breakerAPI = cb.NewBreakerAPI(config)
 
 // Create a new breaker
 var ApiBreaker = cb.NewBreaker(config)
+
+// Request body structure for delay parameter
+type DelayRequest struct {
+	Delay string `json:"delay" binding:"required"`
+}
 
 func testEndpoint(ctx *gin.Context) {
 
@@ -47,15 +50,20 @@ func testEndpoint(ctx *gin.Context) {
 }
 
 func set_delay(ctx *gin.Context) {
-	delayStr := ctx.Query("delay")
-	delay, err := time.ParseDuration(delayStr)
+	var request DelayRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid delay request"})
+		return
+	}
+
+	delay, err := time.ParseDuration(request.Delay)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid delay"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid delay format"})
 		return
 	}
 
 	delayInMilliseconds = delay
-	ctx.JSON(http.StatusOK, gin.H{"message": "Delay set to " + delayStr})
+	ctx.JSON(http.StatusOK, gin.H{"message": "Delay set to " + request.Delay})
 }
 
 func main() {
@@ -64,18 +72,13 @@ func main() {
 
 	// Set endpoints, including the breaker endpoints
 	router := gin.Default()
+
+	// Application endpoints
 	router.GET("/test", testEndpoint)
 	router.POST("/set_delay", set_delay)
-	router.GET("/memory", breakerAPI.GetMemory)
-	router.GET("/latency", breakerAPI.GetLatency)
-	router.GET("/latency_window_size", breakerAPI.GetLatencyWindowSize)
-	router.GET("/percentile", breakerAPI.GetPercentile)
-	router.GET("/wait", breakerAPI.GetWait)
-	router.POST("/set_memory/:threshold", breakerAPI.SetMemory)
-	router.POST("/set_latency/:threshold", breakerAPI.SetLatency)
-	router.POST("/set_latency_window_size/:size", breakerAPI.SetLatencyWindowSize)
-	router.POST("/set_percentile/:percentile", breakerAPI.SetPercentile)
-	router.POST("/set_wait/:wait", breakerAPI.SetWait)
+
+	// Add all breaker endpoints
+	cb.AddEndpointToRouter(router, breakerAPI)
 
 	fmt.Println("Starting server at port 8080")
 
