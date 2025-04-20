@@ -12,16 +12,16 @@ def consult(endpoint_name)
   JSON.parse(response.body)
 end
 
-def set(endpoint_name, value)
-  url = "#{$url}#{endpoint_name}/#{value}"
-  puts "Requesting #{url}"
-  response = HTTP.get(url)
+def post_json(endpoint_name, payload)
+  url = "#{$url}#{endpoint_name}"
+  puts "Posting to #{url} with payload: #{payload.to_json}"
+  response = HTTP.headers('Content-Type' => 'application/json').post(url, json: payload)
   JSON.parse(response.body)
 end
 
 # make a request to the server
 def set_delay(delay)
-  set('set_delay', delay)
+  post_json('set_delay', { delay: delay })
 end
 
 def request
@@ -51,23 +51,27 @@ end
 def memory_usage; consult('memory_usage'); end
 
 def set_memory(memory)
-  set('set_memory', memory)
+  post_json('set_memory', { threshold: memory })
 end
 
-def set_latency(size)
-  set('set_latency', size)
+def set_latency(threshold)
+  post_json('set_latency', { threshold: threshold })
 end
 
 def set_latency_window_size(window_size)
-  set('set_latency_window_size', window_size)
+  post_json('set_latency_window_size', { size: window_size })
 end
 
 def set_percentile(percentile)
-  set('set_percentile', percentile)
+  post_json('set_percentile', { percentile: percentile })
 end
 
 def set_wait_time(wait_time)
-  set('set_wait', wait_time)
+  post_json('set_wait', { wait_time: wait_time })
 end
 
 def get_latencies(threshold); consult("latencies_above_threshold/#{threshold}"); end
+
+def reset; post_json('reset', {}); end
+def enable; post_json('enable', {}); end
+def disable; post_json('disable', {}); end

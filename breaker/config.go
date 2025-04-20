@@ -8,11 +8,13 @@ import (
 
 // Config This Config ios read from a toml file
 type Config struct {
-	MemoryThreshold   float64 `toml:"memory_threshold"`    // Percentage of memory usage
-	LatencyThreshold  int64   `toml:"latency_threshold"`   // In milliseconds
-	LatencyWindowSize int     `toml:"latency_window_size"` // Number of latencies to keep
-	Percentile        float64 `toml:"percentile"`          // Percentile to use
-	WaitTime          int     `toml:"wait_time"`           // Time to wait before reset LatencyWindow in seconds
+	MemoryThreshold             float64 `toml:"memory_threshold"`                // Percentage of memory usage
+	LatencyThreshold            int64   `toml:"latency_threshold"`               // In milliseconds
+	LatencyWindowSize           int     `toml:"latency_window_size"`             // Number of latencies to keep
+	Percentile                  float64 `toml:"percentile"`                      // Percentile to use
+	WaitTime                    int     `toml:"wait_time"`                       // Time to wait before reset LatencyWindow in seconds
+	TrendAnalysisEnabled        bool    `toml:"trend_analysis_enabled"`          // If true, breaker activates only if trend is positive
+	TrendAnalysisMinSampleCount int     `toml:"trend_analysis_min_sample_count"` // Minimum number of samples for trend analysis
 }
 
 const configPath = "BreakerDriver-Config.toml"
