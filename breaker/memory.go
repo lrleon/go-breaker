@@ -74,7 +74,8 @@ func (b *BreakerDriver) MemoryOK() bool {
 	runtime.ReadMemStats(&m)
 
 	currMem := float64(m.Alloc)
-	memLimit := float64(MemoryLimit) * b.config.MemoryThreshold
+	// Convert percentage to fraction by dividing by 100
+	memLimit := float64(MemoryLimit) * (b.config.MemoryThreshold / 100.0)
 
 	return currMem < memLimit
 }
