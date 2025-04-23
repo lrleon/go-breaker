@@ -2,7 +2,6 @@ package breaker
 
 import (
 	"bytes"
-	"log"
 	"os"
 	"runtime"
 	"strconv"
@@ -14,6 +13,7 @@ var MemoryLimitFile = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
 var (
 	memoryOverride      bool
 	memoryOverrideValue bool
+	memoryLogger        = NewLogger("MemoryMonitor")
 )
 
 // SetMemoryOK is used only for testing to override the memory check
@@ -26,7 +26,7 @@ func SetMemoryOK(b *BreakerDriver, value bool) {
 func GetK8sMemoryLimit() (int64, error) {
 	data, err := os.ReadFile(MemoryLimitFile)
 	if err != nil {
-		log.Printf("Error reading memory limit file: %v", err)
+		memoryLogger.Logf("Error reading memory limit file: %v", err)
 		return 0, err
 	}
 	data = bytes.TrimSpace(data)
@@ -43,13 +43,13 @@ func init() {
 
 	// run only if we are in a k8s environment
 	if _, err := os.Stat(MemoryLimitFile); os.IsNotExist(err) {
-		log.Print("Not running in a k8s environment")
+		memoryLogger.Logf("Not running in a k8s environment")
 		return
 	}
 	var err error
 	MemoryLimit, err = GetK8sMemoryLimit()
 	if err != nil {
-		log.Printf("Error getting memory limit: %v", err)
+		memoryLogger.Logf("Error getting memory limit: %v", err)
 		panic(err)
 	}
 }

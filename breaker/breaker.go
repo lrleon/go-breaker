@@ -1,7 +1,6 @@
 package breaker
 
 import (
-	"log"
 	"sync"
 	"time"
 )
@@ -26,6 +25,7 @@ type BreakerDriver struct {
 	lastTripTime  time.Time
 	latencyWindow *LatencyWindow
 	enabled       bool
+	logger        *Logger
 }
 
 func (b *BreakerDriver) IsEnabled() bool {
@@ -57,6 +57,7 @@ func NewBreaker(config *Config) Breaker {
 		config:        *config,
 		latencyWindow: lw,
 		enabled:       true,
+		logger:        NewLogger("BreakerDriver"),
 	}
 }
 
@@ -78,7 +79,7 @@ func (b *BreakerDriver) Allow() bool {
 		if time.Since(b.lastTripTime) > time.Duration(b.config.WaitTime)*time.Second &&
 			b.MemoryOK() {
 			b.triggered = false
-			log.Printf("BreakerDriver has been reset")
+			b.logger.BreakerReset()
 		} else {
 			return false
 		}
@@ -103,8 +104,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	latencyAboveThreshold := latencyPercentile > b.config.LatencyThreshold
 
 	// Logging for debugging
-	log.Printf("Current latency percentile: %v, Threshold: %v, Above threshold: %v",
-		latencyPercentile, b.config.LatencyThreshold, latencyAboveThreshold)
+	b.logger.LatencyInfo(latencyPercentile, b.config.LatencyThreshold, latencyAboveThreshold)
 
 	// Determine whether to trigger the breaker
 	shouldTrigger := false
@@ -117,15 +117,38 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	// For latency issues, check if we need to consider trend analysis
 	if latencyAboveThreshold {
 		if b.config.TrendAnalysisEnabled {
-			// Only trigger if there's also a positive trend in latencies
+			// Only trigger if there's a positive trend in latencies or if latencies
+			// have been consistently high for a while (plateau)
 			hasTrend := b.latencyWindow.HasPositiveTrend(b.config.TrendAnalysisMinSampleCount)
-			log.Printf("Trend analysis enabled. Positive trend detected: %v", hasTrend)
+			b.logger.TrendAnalysisInfo(hasTrend)
 
 			if hasTrend {
-				log.Printf("Breaker triggered: Latency above threshold AND positive trend detected")
+				b.logger.Logf("Breaker triggered: Latency above threshold AND positive trend detected")
 				shouldTrigger = true
 			} else {
-				log.Printf("Latency above threshold but NO positive trend. Not triggering breaker.")
+				// Check for a plateau - latencies consistently above threshold
+				// We consider it a plateau if we have at least 5 samples and they're all above threshold
+				latencies := b.latencyWindow.GetRecentLatencies()
+
+				// If we have enough samples and they're all high, consider it a plateau
+				if len(latencies) >= 5 {
+					allAboveThreshold := true
+					for _, lat := range latencies {
+						if lat <= b.config.LatencyThreshold {
+							allAboveThreshold = false
+							break
+						}
+					}
+
+					if allAboveThreshold {
+						b.logger.Logf("Breaker triggered: Latency plateau detected above threshold")
+						shouldTrigger = true
+					} else {
+						b.logger.Logf("Latency above threshold but NO positive trend or plateau. Not triggering breaker.")
+					}
+				} else {
+					b.logger.Logf("Latency above threshold but NO positive trend. Not triggering breaker.")
+				}
 			}
 		} else {
 			// No trend analysis, trigger based on threshold only
@@ -136,9 +159,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	if shouldTrigger {
 		b.triggered = true
 		b.lastTripTime = time.Now()
-		log.Printf("BreakerDriver triggered. Latency: %v, Memory: %v, TrendAnalysis: %v",
-			latencyPercentile, memoryStatus, b.config.TrendAnalysisEnabled)
-		log.Printf("Retry after %v seconds", b.config.WaitTime)
+		b.logger.BreakerTriggered(latencyPercentile, memoryStatus, b.config.TrendAnalysisEnabled, b.config.WaitTime)
 	}
 }
 

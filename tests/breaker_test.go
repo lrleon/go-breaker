@@ -80,7 +80,10 @@ func Test_breaker_should_trigger_if_memory_is_above_threshold(t *testing.T) {
 		WaitTime:          10,
 	})
 
-	// Add 10 latencies under the threshold and verify the breaker is triggered
+	// Reset any previous memory override that might be left over from other tests
+	breaker.SetMemoryOK(nil, true)
+
+	// Add 10 latencies under the threshold and verify the breaker is not triggered
 	for i := 0; i < 10; i++ {
 		// random latency between 100 and 500
 		val := rand.Int()%400 + 100
@@ -94,15 +97,15 @@ func Test_breaker_should_trigger_if_memory_is_above_threshold(t *testing.T) {
 
 	assert.True(t, b.Allow(), "Breaker should allow because of latencies are below threshold")
 
-	// now we reduce MemoryLimit to trigger the breaker
-	breaker.MemoryLimit = 1 * 1024 * 1024 // 256 MB
+	// Force memory check to fail
+	breaker.SetMemoryOK(b.(*breaker.BreakerDriver), false)
 
 	assert.False(t, b.TriggeredByLatencies(), "Breaker should not be triggered due to memory usage")
 
 	assert.False(t, b.Allow(), "Breaker should not allow because of memory usage")
 
-	// now we increase MemoryLimit to allow the breaker
-	breaker.MemoryLimit = 512 * 1024 * 1024 // 512 MB
+	// Force memory check to pass again
+	breaker.SetMemoryOK(b.(*breaker.BreakerDriver), true)
 
 	assert.True(t, b.Allow(), "Breaker should allow because of memory usage")
 }
@@ -110,6 +113,9 @@ func Test_breaker_should_trigger_if_memory_is_above_threshold(t *testing.T) {
 func Test_breaker_should_trigger_if_memory_is_above_threshold_and_latencies_are_above_threshold(t *testing.T) {
 
 	breaker.MemoryLimit = 512 * 1024 * 1024 // 512 MB
+
+	// Reset any previous memory override
+	breaker.SetMemoryOK(nil, true)
 
 	b := breaker.NewBreaker(&breaker.Config{
 		MemoryThreshold:   0.5,
@@ -133,17 +139,16 @@ func Test_breaker_should_trigger_if_memory_is_above_threshold_and_latencies_are_
 
 	assert.False(t, b.Allow(), "Breaker should not allow")
 
-	// now we reduce MemoryLimit to trigger the breaker and reset the breaker
-	breaker.MemoryLimit = 1 * 1024 * 1024 // 256 MB
-
+	// Reset and force memory check to fail
 	b.Reset()
+	breaker.SetMemoryOK(b.(*breaker.BreakerDriver), false)
 
 	assert.False(t, b.TriggeredByLatencies(), "Breaker should not be triggered due to memory usage")
 
 	assert.False(t, b.Allow(), "Breaker should not allow because of memory usage")
 
-	// now we increase MemoryLimit to allow the breaker
-	breaker.MemoryLimit = 512 * 1024 * 1024 // 512 MB
+	// Force memory check to pass
+	breaker.SetMemoryOK(b.(*breaker.BreakerDriver), true)
 
 	assert.True(t, b.Allow(), "Breaker should allow")
 
