@@ -268,6 +268,42 @@ func (b *BreakerAPI) GetMemoryUsage(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"memory_usage": m.Alloc})
 }
 
+// GetTrendAnalysis Return the trend analysis of the latencies
+func (b *BreakerAPI) GetTrendAnalysis(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	ctx.JSON(http.StatusOK, gin.H{"trend_analysis": b.Config.TrendAnalysisEnabled})
+}
+
+type TrendAnalysisRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+func (b *BreakerAPI) SetTrendAnalysis(ctx *gin.Context) {
+	var request TrendAnalysisRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		log.Printf("Invalid trend analysis request: %v", err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid trend analysis request"})
+		return
+	}
+
+	enabled := request.Enabled
+
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	b.Config.TrendAnalysisEnabled = enabled
+	err := SaveConfig("BreakerDriver-Config.toml", &b.Config)
+	if err != nil {
+		log.Printf("Failed to save Config: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"message": "Trend analysis set to " + strconv.FormatBool(enabled)})
+}
+
 func (b *BreakerAPI) LatenciesAboveThreshold(ctx *gin.Context) {
 	thresholdStr := ctx.Param("threshold")
 	threshold, err := strconv.Atoi(thresholdStr)
@@ -312,4 +348,6 @@ func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 	group.GET("/latencies_above_threshold/:threshold", breakerAPI.LatenciesAboveThreshold)
 	group.GET("/memory_limit", breakerAPI.GetMemoryLimit)
 	group.POST("/reset", breakerAPI.Reset)
+	group.POST("/set_trend_analysis", breakerAPI.SetTrendAnalysis)
+	group.GET("/trend_analysis", breakerAPI.GetTrendAnalysis)
 }

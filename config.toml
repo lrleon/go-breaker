@@ -4,6 +4,12 @@
 # GET Endpoints
 
 [[endpoints]]
+name = "Get Breaker Status"
+path = "/breaker/enabled"
+method = "GET"
+description = "Get the current status of the breaker"
+
+[[endpoints]]
 name = "Get Memory Threshold"
 path = "/breaker/memory"
 method = "GET"
@@ -38,6 +44,12 @@ name = "Test Endpoint"
 path = "/test"
 method = "GET"
 description = "Test endpoint that uses the breaker for protection"
+
+[[endpoints]]
+name = "Get trend analysis status"
+path = "/breaker/trend_analysis"
+method = "GET"
+description = "Get trend analysis status"
 
 # POST Endpoints
 
@@ -124,3 +136,29 @@ schema = '''
   "delay": "string"
 }
 '''
+
+[[endpoints]]
+name = "Set trend analysis status"
+path = "/breaker/set_trend_analysis"
+method = "POST"
+description = "Set trend analysis status"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "enabled": "boolean",
+}
+'''
+
+[[endpoints]]
+name = "Enable Breaker"
+path = "/breaker/enable"
+method = "POST"
+description =  "Enable the breaker"
+
+[[endpoints]]
+name = "Disable Breaker"
+path = "/breaker/disable"
+method = "POST"
+description =  "Disable the breaker"

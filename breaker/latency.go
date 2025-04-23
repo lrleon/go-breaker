@@ -48,6 +48,7 @@ func (lw *LatencyWindow) Reset() {
 
 // GetRecentLatencies returns only latencies within the configured time period
 func (lw *LatencyWindow) GetRecentLatencies() []int64 {
+
 	cutoffTime := time.Now().Add(-time.Duration(lw.MaxAgeSeconds) * time.Second)
 	var recentValues []int64
 
