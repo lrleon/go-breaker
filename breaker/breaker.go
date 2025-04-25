@@ -80,6 +80,34 @@ func NewBreaker(config *Config) Breaker {
 	}
 }
 
+// NewBreakerFromConfigFile creates a new Breaker instance from a TOML configuration file.
+// It reads the configuration from the specified file path, and if successful,
+// it initializes and returns a new Breaker with that configuration.
+// If the file cannot be read or parsed, it returns an error.
+func NewBreakerFromConfigFile(configPath string) (Breaker, error) {
+	// Load configuration from the specified file
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// If OpsGenie section is present but incomplete, try loading from separate OpsGenie config file
+	if config.OpsGenie != nil && config.OpsGenie.Enabled && config.OpsGenie.APIKey == "" {
+		// Try to load from the default OpsGenie config path
+		opsGenieConfig, opsGenieErr := LoadOpsGenieConfig(GetOpsGenieConfigPath())
+		if opsGenieErr == nil {
+			config.OpsGenie = opsGenieConfig
+		} else {
+			// Log warning but continue - OpsGenie features just won't work
+			logger := NewLogger("BreakerDriver")
+			logger.Logf("Warning: OpsGenie config enabled but failed to load: %v", opsGenieErr)
+		}
+	}
+
+	// Create the breaker with the loaded configuration
+	return NewBreaker(config), nil
+}
+
 // Return true if the memory usage is above the threshold and the LatencyWindow
 // is below the threshold
 func (b *BreakerDriver) isHealthy() bool {
@@ -128,7 +156,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	latencyPercentile := b.latencyWindow.Percentile(b.config.Percentile)
 	memoryStatus := b.MemoryOK()
 
-	// Check if latency is above threshold
+	// Check if latency is above the threshold
 	latencyAboveThreshold := latencyPercentile > b.config.LatencyThreshold
 
 	// Logging for debugging
@@ -145,7 +173,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	// For latency issues, check if we need to consider trend analysis
 	if latencyAboveThreshold {
 		if b.config.TrendAnalysisEnabled {
-			// Only trigger if there's a positive trend in latencies or if latencies
+			// Only trigger if there's a positive trend in latencies, or if latencies
 			// have been consistently high for a while (plateau)
 			hasTrend := b.latencyWindow.HasPositiveTrend(b.config.TrendAnalysisMinSampleCount)
 			b.logger.TrendAnalysisInfo(hasTrend)
@@ -155,10 +183,10 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 				shouldTrigger = true
 			} else {
 				// Check for a plateau - latencies consistently above threshold
-				// We consider it a plateau if we have at least 5 samples and they're all above threshold
+				// We consider it a plateau if we have at least 5 samples, and they're all above threshold
 				latencies := b.latencyWindow.GetRecentLatencies()
 
-				// If we have enough samples and they're all high, consider it a plateau
+				// If we have enough samples, and they're all high, consider it a plateau
 				if len(latencies) >= 5 {
 					allAboveThreshold := true
 					for _, lat := range latencies {
@@ -179,7 +207,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 				}
 			}
 		} else {
-			// No trend analysis, trigger based on threshold only
+			// No trend analysis, trigger based on a threshold only
 			shouldTrigger = true
 		}
 	}

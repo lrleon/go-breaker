@@ -4,6 +4,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"log"
 	"os"
+	"sync"
 )
 
 // OpsGenieConfig represents the OpsGenie integration configuration
@@ -52,7 +53,23 @@ type Config struct {
 const configPath = "BreakerDriver-Config.toml"
 
 // Deprecated: Now using the opsgenie section in the main config file
-const opsGenieConfigPath = "opsgenie.toml"
+var opsGenieConfigPath = "opsgenie.toml"
+var opsGeniePathMu sync.RWMutex
+
+// GetOpsGenieConfigPath returns the current path to the OpsGenie configuration file
+func GetOpsGenieConfigPath() string {
+	opsGeniePathMu.RLock()
+	defer opsGeniePathMu.RUnlock()
+	return opsGenieConfigPath
+}
+
+// SetOpsGenieConfigPath sets the path to the OpsGenie configuration file
+// This is useful for testing or when the file is in a non-standard location
+func SetOpsGenieConfigPath(path string) {
+	opsGeniePathMu.Lock()
+	defer opsGeniePathMu.Unlock()
+	opsGenieConfigPath = path
+}
 
 var config *Config
 
