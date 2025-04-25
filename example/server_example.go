@@ -12,15 +12,23 @@ import (
 	cb "github.com/lrleon/go-breaker/breaker"
 )
 
-// example of a server using breaker
+// Example of a server using breaker
+//
+// OpsGenie Integration:
+// This example can be configured to send alerts to OpsGenie when the circuit breaker is triggered.
+// For security, the OpsGenie API key should be set via environment variables:
+//
+//   export OPSGENIE_API_KEY="your-api-key-here"
+//   export OPSGENIE_REGION="us"  # Optional, defaults to "us"
+//   export OPSGENIE_API_URL=""   # Optional, for custom OpsGenie endpoints
+//
+// Additionally, you can set OPSGENIE_REQUIRED=true if the application should fail
+// when OpsGenie integration fails to initialize.
 
 var delayInMilliseconds time.Duration = 1000
 
-// Default paths for configuration files
-const (
-	defaultConfigPath         = "BreakerDriver-Config.toml"
-	defaultOpsGenieConfigPath = "opsgenie.toml"
-)
+// Default path for configuration file
+const defaultConfigPath = "BreakerDriver-Config.toml"
 
 var breakerAPI *cb.BreakerAPI
 var ApiBreaker cb.Breaker
@@ -40,50 +48,54 @@ func testEndpoint(ctx *gin.Context) {
 
 	startTime := time.Now()
 
-	// Simulate a delay
 	time.Sleep(delayInMilliseconds * time.Millisecond)
-
-	ctx.JSON(http.StatusOK, gin.H{"message": "Hello, World!"})
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "delay": delayInMilliseconds})
 
 	ApiBreaker.Done(startTime, time.Now())
 }
 
+// Endpoint to set delay value
 func set_delay(ctx *gin.Context) {
-	var request DelayRequest
-	if err := ctx.ShouldBindJSON(&request); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid delay request"})
+	var req DelayRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	delay, err := time.ParseDuration(request.Delay)
+	// Parse the delay value
+	d, err := time.ParseDuration(req.Delay)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid delay format"})
 		return
 	}
 
-	delayInMilliseconds = delay
-	ctx.JSON(http.StatusOK, gin.H{"message": "Delay set to " + request.Delay})
+	delayInMilliseconds = d / time.Millisecond
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "delay_ms": delayInMilliseconds})
 }
 
 // testOpsGenieConnection is a new endpoint to test the OpsGenie connection
 func testOpsGenieConnection(ctx *gin.Context) {
-	if opsGenieClient == nil {
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "OpsGenie client not initialized"})
+	if opsGenieClient == nil || !opsGenieClient.IsInitialized() {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":  "error",
+			"message": "OpsGenie client is not initialized",
+		})
 		return
 	}
 
+	// Test the connection
 	err := opsGenieClient.TestConnection()
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": fmt.Sprintf("OpsGenie connection test failed: %v", err),
+			"status":  "error",
+			"message": fmt.Sprintf("Failed to connect to OpsGenie: %v", err),
 		})
 		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Successfully connected to OpsGenie API",
+		"status":  "success",
+		"message": "Successfully connected to OpsGenie",
 	})
 }
 
@@ -91,10 +103,10 @@ func main() {
 	// Set memory limit for the breaker
 	cb.MemoryLimit = 512 * 1024 * 1024 // 512 MB
 
-	// Load both configurations
-	config, err := cb.LoadFullConfig(defaultConfigPath, defaultOpsGenieConfigPath)
+	// Load configuration
+	config, err := cb.LoadConfig(defaultConfigPath)
 	if err != nil {
-		log.Printf("Warning: Failed to load full configuration: %v", err)
+		log.Printf("Warning: Failed to load configuration: %v", err)
 		log.Println("Creating default configuration")
 
 		// Create default configuration if loading fails

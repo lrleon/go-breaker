@@ -14,6 +14,7 @@ A circuit breaker implementation in Go that helps prevent system overload by mon
 - Thread-safe operation
 - HTTP API for runtime configuration
 - Kubernetes-aware memory limit detection
+- OpsGenie integration for circuit breaker event alerts
 
 ## Installation
 
@@ -139,6 +140,69 @@ func main() {
     router.Run(":8080")
 }
 ```
+
+## OpsGenie Integration
+
+Go-Breaker integrates with OpsGenie to send alerts when circuit breaker events occur, helping teams quickly respond to service degradation.
+
+### Configuration
+
+Configure OpsGenie integration in your TOML configuration file:
+
+```toml
+[opsgenie]
+enabled = true
+region = "us"
+source = "go-breaker"
+tags = ["production", "api"]
+team = "platform-team"
+trigger_on_open = true
+trigger_on_reset = true
+trigger_on_memory = true
+trigger_on_latency = true
+include_latency_metrics = true
+include_memory_metrics = true
+include_system_info = true
+latency_threshold = 1500
+alert_cooldown_seconds = 300
+priority = "P2"
+
+# API Information to include in alerts
+api_name = "Payment API"
+api_version = "v1.2.3"
+api_namespace = "payment"
+api_description = "Handles payment processing"
+api_owner = "Payments Team"
+api_priority = "critical"
+```
+
+### Environment Variables
+
+For security reasons, the OpsGenie API key is configured via environment variables:
+
+```bash
+export OPSGENIE_API_KEY="your-api-key-here"
+export OPSGENIE_REGION="us"  # Optional, defaults to "us"
+export OPSGENIE_API_URL=""   # Optional, for custom API endpoints
+export OPSGENIE_REQUIRED="false"  # Optional, exit on OpsGenie init failure if "true"
+```
+
+### Usage with OpsGenie
+
+When configured, Go-Breaker will automatically send alerts to OpsGenie:
+
+1. When the circuit breaker trips (opens)
+2. When the circuit breaker resets (closes)
+3. When memory usage exceeds the configured threshold
+4. When latency exceeds the configured threshold
+
+Each alert contains:
+- API information and details
+- Current breaker state
+- Performance metrics
+- System information (when enabled)
+
+For more details, see the [TOML Configuration Guide](TOML_CONFIG.md).
 
 ## Configuration
 
