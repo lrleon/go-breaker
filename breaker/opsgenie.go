@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/opsgenie/opsgenie-go-sdk-v2/alert"
@@ -28,12 +29,33 @@ type MemoryStatus struct {
 	OK           bool
 }
 
+// Variables for implementing the singleton pattern
+var (
+	opsgenieClientInstance *OpsGenieClient
+	opsgenieClientOnce     sync.Once
+	opsgenieClientMutex    sync.Mutex
+)
+
+// GetOpsGenieClient returns a singleton instance of the OpsGenie client
+// Ensures that only one shared instance of the client exists across the application
+func GetOpsGenieClient(config *OpsGenieConfig) *OpsGenieClient {
+	opsgenieClientOnce.Do(func() {
+		opsgenieClientInstance = NewOpsGenieClient(config)
+		err := opsgenieClientInstance.Initialize()
+		if err != nil {
+			log.Printf("Error initializing OpsGenie client: %v", err)
+		}
+	})
+	return opsgenieClientInstance
+}
+
 // OpsGenieClient wraps the OpsGenie SDK client and provides methods to interact with OpsGenie
 type OpsGenieClient struct {
 	config        *OpsGenieConfig
 	alertClient   *alert.Client
 	lastAlertTime map[string]time.Time // Map to track when each alert type was last sent
 	initialized   bool
+	mutex         sync.RWMutex // Mutex to protect concurrent access to the lastAlertTime map
 }
 
 // NewOpsGenieClient creates a new OpsGenie client with the given configuration
@@ -147,24 +169,44 @@ func (o *OpsGenieClient) IsInitialized() bool {
 // isOnCooldown checks if an alert type is still in its cooldown period
 func (o *OpsGenieClient) isOnCooldown(alertType string) bool {
 	if o == nil || o.config == nil {
+		log.Printf("OpsGenie client or config is nil when checking cooldown for %s", alertType)
 		return true
 	}
 
+	// Acquire lock for safe reading of the map
+	o.mutex.RLock()
+	defer o.mutex.RUnlock()
+
 	lastSent, exists := o.lastAlertTime[alertType]
 	if !exists {
+		log.Printf("Alert type %s has never been sent before", alertType)
 		return false // Never sent before
 	}
 
 	cooldownDuration := time.Duration(o.config.AlertCooldownSeconds) * time.Second
-	return time.Since(lastSent) < cooldownDuration
+	timeSinceLastAlert := time.Since(lastSent)
+	isOnCooldown := timeSinceLastAlert < cooldownDuration
+
+	log.Printf("Alert %s - Last sent: %v, Cooldown duration: %v, Time since last: %v, On cooldown: %v",
+		alertType, lastSent.Format(time.RFC3339), cooldownDuration, timeSinceLastAlert, isOnCooldown)
+
+	return isOnCooldown
 }
 
 // recordAlert records when an alert was sent to enforce cooldown periods
 func (o *OpsGenieClient) recordAlert(alertType string) {
 	if o == nil {
+		log.Printf("Cannot record alert time for %s: OpsGenie client is nil", alertType)
 		return
 	}
-	o.lastAlertTime[alertType] = time.Now()
+
+	// Acquire lock for safe writing to the map
+	o.mutex.Lock()
+	defer o.mutex.Unlock()
+
+	now := time.Now()
+	o.lastAlertTime[alertType] = now
+	log.Printf("Recorded alert %s at %v", alertType, now.Format(time.RFC3339))
 }
 
 // buildAPIInfoDetails creates a structured description of the API for alert details
@@ -418,7 +460,7 @@ func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) er
 	}
 
 	// Add memory metrics if enabled
-	if o.config.IncludeMemoryMetrics && memoryStatus != nil {
+	if o.config.IncludeMemoryMetrics /* && memoryStatus != nil */ {
 		req.Description += fmt.Sprintf("\n\nCurrent Memory Usage: %.1f%%", memoryStatus.CurrentUsage)
 		req.Description += fmt.Sprintf("\nMemory Threshold: %.1f%%", memoryStatus.Threshold)
 		req.Description += fmt.Sprintf("\nTotal Memory: %d MB", memoryStatus.TotalMemory/(1024*1024))
