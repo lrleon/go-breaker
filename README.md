@@ -219,7 +219,7 @@ The `Config` struct configures the breaker with the following fields:
 Configuration can be loaded from a TOML file:
 
 ```toml
-# config.toml
+# breakers.toml
 memory_threshold = 80.0
 latency_threshold = 1500
 latency_window_size = 64
@@ -228,7 +228,7 @@ wait_time = 10
 ```
 
 ```go
-config, err := breaker.LoadConfig("config.toml")
+config, err := breaker.LoadConfig("breakers.toml")
 if err != nil {
     log.Fatalf("Failed to load config: %v", err)
 }

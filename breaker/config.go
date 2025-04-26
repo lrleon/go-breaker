@@ -50,7 +50,7 @@ type Config struct {
 	OpsGenie                    *OpsGenieConfig `toml:"opsgenie"`                        // OpsGenie configuration
 }
 
-const configPath = "BreakerDriver-Config.toml"
+const configPath = "breakers.toml"
 
 // Deprecated: Now using the opsgenie section in the main config file
 var opsGenieConfigPath = "opsgenie.toml"

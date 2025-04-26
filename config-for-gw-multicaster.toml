@@ -1,6 +1,6 @@
 # Gateway Multicaster Configuration for go-breaker
 
-## Paste this configuration in the config.toml file
+## Paste this configuration in the breakers.toml file
 # GET Endpoints
 
 [[endpoints]]

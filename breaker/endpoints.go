@@ -86,7 +86,7 @@ func (b *BreakerAPI) SetMemory(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.MemoryThreshold = float64(threshold)
-	err := SaveConfig("BreakerDriver-Config.toml", &b.Config)
+	err := SaveConfig("breakers.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -124,7 +124,7 @@ func (b *BreakerAPI) SetLatency(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.LatencyThreshold = int64(threshold)
-	err := SaveConfig("BreakerDriver-Config.toml", &b.Config)
+	err := SaveConfig("breakers.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -162,7 +162,7 @@ func (b *BreakerAPI) SetLatencyWindowSize(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.LatencyWindowSize = size
-	err := SaveConfig("BreakerDriver-Config.toml", &b.Config)
+	err := SaveConfig("breakers.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -207,7 +207,7 @@ func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.Percentile = percentile / 100.0
-	err := SaveConfig("BreakerDriver-Config.toml", &b.Config)
+	err := SaveConfig("breakers.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -245,7 +245,7 @@ func (b *BreakerAPI) SetWait(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.WaitTime = wait
-	err := SaveConfig("BreakerDriver-Config.toml", &b.Config)
+	err := SaveConfig("breakers.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -295,7 +295,7 @@ func (b *BreakerAPI) SetTrendAnalysis(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.TrendAnalysisEnabled = enabled
-	err := SaveConfig("BreakerDriver-Config.toml", &b.Config)
+	err := SaveConfig("breakers.toml", &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
