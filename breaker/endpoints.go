@@ -356,6 +356,7 @@ type BreakerStatus struct {
 	MemoryOK           bool    `json:"memory_ok"`
 	CurrentMemoryUsage int64   `json:"current_memory_usage_mb"`
 	MemoryThreshold    float64 `json:"memory_threshold_percent"`
+	TotalMemoryMB      int64   `json:"total_memory_mb"`
 
 	// Latency metrics
 	LatencyOK         bool    `json:"latency_ok"`
@@ -421,6 +422,7 @@ func (b *BreakerAPI) GetBreakerStatus(ctx *gin.Context) {
 		MemoryOK:                    driver.MemoryOK(),
 		CurrentMemoryUsage:          currentMemoryUsageMB,
 		MemoryThreshold:             driver.config.MemoryThreshold,
+		TotalMemoryMB:               TotalMemoryMB(),
 		LatencyOK:                   driver.LatencyOK(),
 		CurrentPercentile:           latencyPercentile,
 		LatencyThreshold:            driver.config.LatencyThreshold,
@@ -467,4 +469,16 @@ func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 		breakerGroup.GET("/memory-limit", breakerAPI.GetMemoryLimit)
 		breakerGroup.POST("/reset", breakerAPI.Reset)
 	}
+}
+
+func TotalMemoryMB() int64 {
+	// If we are in Kubernetes, return the container memory limit
+	if MemoryLimit > 0 {
+		return MemoryLimit / (1024 * 1024) // Convert from bytes to MB
+	}
+
+	// If we are not in Kubernetes, return the system memory
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return int64(m.Sys / (1024 * 1024))
 }
