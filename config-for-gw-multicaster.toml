@@ -168,6 +168,13 @@ name = "Reset Breaker"
 path = "/breaker/reset"
 method = "POST"
 description =  "Reset the breaker"
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "confirm": "boolean"
+}
+'''
 
 [endpoints.body]
 content_type = "application/json"
