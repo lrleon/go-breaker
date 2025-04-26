@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -329,25 +330,126 @@ func (b *BreakerAPI) Reset(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "Breaker reset"})
 }
 
+// BreakerStatus represents the complete status of the circuit breaker
+type BreakerStatus struct {
+	// Overall breaker state
+	Enabled      bool      `json:"enabled"`
+	Triggered    bool      `json:"triggered"`
+	LastTripTime time.Time `json:"last_trip_time,omitempty"`
+
+	// Memory metrics
+	MemoryOK           bool    `json:"memory_ok"`
+	CurrentMemoryUsage int64   `json:"current_memory_usage_mb"`
+	MemoryThreshold    float64 `json:"memory_threshold_percent"`
+
+	// Latency metrics
+	LatencyOK         bool    `json:"latency_ok"`
+	CurrentPercentile int64   `json:"current_percentile_ms"`
+	LatencyThreshold  int64   `json:"latency_threshold_ms"`
+	PercentileValue   float64 `json:"percentile_value"`
+
+	// Configuration
+	LatencyWindowSize int `json:"latency_window_size"`
+	WaitTime          int `json:"wait_time_seconds"`
+
+	// Recent latencies
+	RecentLatencies []int64 `json:"recent_latencies_ms"`
+
+	// Trend analysis
+	TrendAnalysisEnabled        bool `json:"trend_analysis_enabled"`
+	TrendAnalysisMinSampleCount int  `json:"trend_analysis_min_sample_count"`
+	HasPositiveTrend            bool `json:"has_positive_trend"`
+}
+
+// GetBreakerStatus returns detailed information about the current state of the circuit breaker
+func (b *BreakerAPI) GetBreakerStatus(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	// Get the BreakerDriver from the interface
+	// We need to cast it to access internal details
+	driver, ok := b.Driver.(*BreakerDriver)
+	if !ok {
+		// If the driver is not a BreakerDriver, return a minimal status
+		ctx.JSON(http.StatusOK, gin.H{
+			"enabled":    b.Driver.IsEnabled(),
+			"triggered":  b.Driver.TriggeredByLatencies(),
+			"memory_ok":  b.Driver.MemoryOK(),
+			"latency_ok": b.Driver.LatencyOK(),
+		})
+		return
+	}
+
+	// Need to acquire the driver's mutex to access internal state safely
+	driver.mu.Lock()
+	defer driver.mu.Unlock()
+
+	// Get current memory usage
+	currentMemoryUsageMB := MemoryUsage()
+
+	// Get current latency percentile
+	latencyPercentile := driver.latencyWindow.Percentile(driver.config.Percentile)
+
+	// Get recent latencies
+	recentLatencies := driver.latencyWindow.GetRecentLatencies()
+
+	// Check if there's a positive trend in latencies
+	hasPositiveTrend := false
+	if len(recentLatencies) >= driver.config.TrendAnalysisMinSampleCount {
+		hasPositiveTrend = driver.latencyWindow.HasPositiveTrend(driver.config.TrendAnalysisMinSampleCount)
+	}
+
+	// Prepare the status object
+	status := BreakerStatus{
+		Enabled:                     driver.enabled,
+		Triggered:                   driver.triggered,
+		MemoryOK:                    driver.MemoryOK(),
+		CurrentMemoryUsage:          currentMemoryUsageMB,
+		MemoryThreshold:             driver.config.MemoryThreshold,
+		LatencyOK:                   driver.LatencyOK(),
+		CurrentPercentile:           latencyPercentile,
+		LatencyThreshold:            driver.config.LatencyThreshold,
+		PercentileValue:             driver.config.Percentile,
+		LatencyWindowSize:           driver.config.LatencyWindowSize,
+		WaitTime:                    driver.config.WaitTime,
+		RecentLatencies:             recentLatencies,
+		TrendAnalysisEnabled:        driver.config.TrendAnalysisEnabled,
+		TrendAnalysisMinSampleCount: driver.config.TrendAnalysisMinSampleCount,
+		HasPositiveTrend:            hasPositiveTrend,
+	}
+
+	// Only include last trip time if the breaker is triggered
+	if driver.triggered {
+		status.LastTripTime = driver.lastTripTime
+	}
+
+	ctx.JSON(http.StatusOK, status)
+}
+
+// AddEndpointToRouter adds all the breaker endpoints to the provided router
 func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
-	group := router.Group("/breaker")
-	group.GET("/enabled", breakerAPI.GetEnabled)
-	group.POST("/disable", breakerAPI.SetDisabled)
-	group.POST("/enable", breakerAPI.SetEnabled)
-	group.GET("/memory", breakerAPI.GetMemory)
-	group.GET("/latency", breakerAPI.GetLatency)
-	group.GET("/latency_window_size", breakerAPI.GetLatencyWindowSize)
-	group.GET("/percentile", breakerAPI.GetPercentile)
-	group.GET("/wait", breakerAPI.GetWait)
-	group.POST("/set_memory", breakerAPI.SetMemory)
-	group.POST("/set_latency", breakerAPI.SetLatency)
-	group.POST("/set_latency_window_size", breakerAPI.SetLatencyWindowSize)
-	group.POST("/set_percentile", breakerAPI.SetPercentile)
-	group.POST("/set_wait", breakerAPI.SetWait)
-	group.GET("/memory_usage", breakerAPI.GetMemoryUsage)
-	group.GET("/latencies_above_threshold/:threshold", breakerAPI.LatenciesAboveThreshold)
-	group.GET("/memory_limit", breakerAPI.GetMemoryLimit)
-	group.POST("/reset", breakerAPI.Reset)
-	group.POST("/set_trend_analysis", breakerAPI.SetTrendAnalysis)
-	group.GET("/trend_analysis", breakerAPI.GetTrendAnalysis)
+	// Create a router group for the breaker
+	breakerGroup := router.Group("/breaker")
+	{
+		breakerGroup.GET("/status", breakerAPI.GetBreakerStatus)
+		breakerGroup.GET("/enabled", breakerAPI.GetEnabled)
+		breakerGroup.POST("/enabled", breakerAPI.SetEnabled)
+		breakerGroup.POST("/disabled", breakerAPI.SetDisabled)
+		breakerGroup.GET("/memory", breakerAPI.GetMemory)
+		breakerGroup.POST("/memory", breakerAPI.SetMemory)
+		breakerGroup.GET("/latency", breakerAPI.GetLatency)
+		breakerGroup.POST("/latency", breakerAPI.SetLatency)
+		breakerGroup.GET("/latency-window-size", breakerAPI.GetLatencyWindowSize)
+		breakerGroup.POST("/latency-window-size", breakerAPI.SetLatencyWindowSize)
+		breakerGroup.GET("/percentile", breakerAPI.GetPercentile)
+		breakerGroup.POST("/percentile", breakerAPI.SetPercentile)
+		breakerGroup.GET("/wait", breakerAPI.GetWait)
+		breakerGroup.POST("/wait", breakerAPI.SetWait)
+		breakerGroup.GET("/memory-usage", breakerAPI.GetMemoryUsage)
+		breakerGroup.GET("/trend-analysis", breakerAPI.GetTrendAnalysis)
+		breakerGroup.POST("/trend-analysis", breakerAPI.SetTrendAnalysis)
+		breakerGroup.GET("/latencies-above-threshold", breakerAPI.LatenciesAboveThreshold)
+		breakerGroup.GET("/memory-limit", breakerAPI.GetMemoryLimit)
+		breakerGroup.POST("/reset", breakerAPI.Reset)
+	}
 }

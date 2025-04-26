@@ -1,0 +1,72 @@
+memory_threshold = 90.0
+latency_threshold = 1500
+latency_window_size = 64
+percentile = 0.95
+wait_time = 0
+trend_analysis_enabled = false
+trend_analysis_min_sample_count = 0
+
+# OpsGenie Configuration for Circuit Breaker Alerts
+[opsgenie]
+# Basic Connection Settings
+enabled = true                       # Set to true to enable OpsGenie alerts
+api_key = ""                         # Optional: Fallback API key if OPSGENIE_API_KEY env var is not set
+region = "us"                        # Region: "us" or "eu" (can be overridden with OPSGENIE_REGION env var)
+api_url = ""                         # Optional: Custom API URL (can be overridden with OPSGENIE_API_URL env var)
+
+# Alert Configuration
+priority = "P1"                      # Default priority for alerts: P1 (critical) to P5 (lowest)
+source = "go-breaker"                # Source identifier for the alerts
+team = ""                            # Optional: Team name to assign the alerts to
+tags = ["circuit-breaker", "availability"]  # Tags to categorize the alerts
+
+# Alert Triggers
+trigger_on_breaker_open = true       # Send alert when circuit breaker opens
+trigger_on_breaker_reset = false     # Send alert when circuit breaker resets
+trigger_on_memory_threshold = true   # Send alert on memory threshold breach
+trigger_on_latency_threshold = true  # Send alert on latency threshold breach
+
+# Alert Content
+include_latency_metrics = true       # Include latency metrics in alert
+include_memory_metrics = true        # Include memory metrics in alert
+include_system_info = true           # Include system info in alert
+
+# Rate Limiting
+alert_cooldown_seconds = 300         # Minimum time between identical alerts (prevents alert storms)
+
+# API Information - Complete this section to better identify the affected service
+api_namespace = "production"         # Environment/namespace (e.g., production, staging, development)
+api_name = "payment-service"         # Name of the API being protected by the circuit breaker
+api_version = "v1.2.0"               # Version of the API
+api_owner = "Payments Team"          # Team or individual responsible for the API
+api_priority = "critical"            # Business priority of the API (critical, high, medium, low)
+api_description = "Handles payment processing and verification" # Brief description of the API's purpose
+
+# List of critical dependencies for this API
+api_dependencies = [
+  "database-service",
+  "auth-service",
+  "notification-service"
+]
+
+# List of important endpoints protected by this circuit breaker
+api_endpoints = [
+  "/api/payments/process",
+  "/api/payments/verify",
+  "/api/payments/refund"
+]
+
+# Any custom attributes you want to include in alerts
+[opsgenie.api_custom_attributes]
+region = "us-east-1"
+data_center = "aws-virginia"
+on_call_rotation = "payments-team-rotation"
+
+# ==========================================================================
+# SECURITY NOTE: For production environments, set the API key using environment
+# variables instead of storing it in this file:
+#
+# export OPSGENIE_API_KEY="your-api-key-here"
+# export OPSGENIE_REGION="us" or "eu"  # Optional
+# export OPSGENIE_API_URL="https://custom-url"  # Optional
+# ==========================================================================

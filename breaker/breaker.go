@@ -19,13 +19,14 @@ type Breaker interface {
 }
 
 type BreakerDriver struct {
-	mu            sync.Mutex
-	config        Config
-	triggered     bool
-	lastTripTime  time.Time
-	latencyWindow *LatencyWindow
-	enabled       bool
-	logger        *Logger
+	mu             sync.Mutex
+	config         Config
+	triggered      bool
+	lastTripTime   time.Time
+	latencyWindow  *LatencyWindow
+	enabled        bool
+	logger         *Logger
+	opsGenieClient *OpsGenieClient // OpsGenie client for sending alerts
 }
 
 func (b *BreakerDriver) IsEnabled() bool {
@@ -53,12 +54,58 @@ func NewBreaker(config *Config) Breaker {
 		lw.MaxAgeSeconds = config.WaitTime
 	}
 
-	return &BreakerDriver{
-		config:        *config,
-		latencyWindow: lw,
-		enabled:       true,
-		logger:        NewLogger("BreakerDriver"),
+	// Create a new OpsGenie client if configuration is provided
+	var opsGenieClient *OpsGenieClient
+	if config.OpsGenie != nil {
+		opsGenieClient = NewOpsGenieClient(config.OpsGenie)
+		// Initialize the client in a goroutine to avoid blocking
+		if config.OpsGenie.Enabled {
+			go func() {
+				if err := opsGenieClient.Initialize(); err != nil {
+					// Just log the error, don't fail the breaker creation
+					// The circuit breaker will still work without OpsGenie
+					logger := NewLogger("OpsGenie")
+					logger.Logf("Failed to initialize OpsGenie: %v", err)
+				}
+			}()
+		}
 	}
+
+	return &BreakerDriver{
+		config:         *config,
+		latencyWindow:  lw,
+		enabled:        true,
+		logger:         NewLogger("BreakerDriver"),
+		opsGenieClient: opsGenieClient,
+	}
+}
+
+// NewBreakerFromConfigFile creates a new Breaker instance from a TOML configuration file.
+// It reads the configuration from the specified file path, and if successful,
+// it initializes and returns a new Breaker with that configuration.
+// If the file cannot be read or parsed, it returns an error.
+func NewBreakerFromConfigFile(configPath string) (Breaker, error) {
+	// Load configuration from the specified file
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// If OpsGenie section is present but incomplete, try loading from separate OpsGenie config file
+	if config.OpsGenie != nil && config.OpsGenie.Enabled && config.OpsGenie.APIKey == "" {
+		// Try to load from the default OpsGenie config path
+		opsGenieConfig, opsGenieErr := LoadOpsGenieConfig(GetOpsGenieConfigPath())
+		if opsGenieErr == nil {
+			config.OpsGenie = opsGenieConfig
+		} else {
+			// Log warning but continue - OpsGenie features just won't work
+			logger := NewLogger("BreakerDriver")
+			logger.Logf("Warning: OpsGenie config enabled but failed to load: %v", opsGenieErr)
+		}
+	}
+
+	// Create the breaker with the loaded configuration
+	return NewBreaker(config), nil
 }
 
 // Return true if the memory usage is above the threshold and the LatencyWindow
@@ -80,6 +127,15 @@ func (b *BreakerDriver) Allow() bool {
 			b.MemoryOK() {
 			b.triggered = false
 			b.logger.BreakerReset()
+
+			// Send OpsGenie alert for breaker reset
+			if b.opsGenieClient != nil && b.config.OpsGenie != nil && b.config.OpsGenie.Enabled {
+				go func() {
+					if err := b.opsGenieClient.SendBreakerResetAlert(); err != nil {
+						b.logger.Logf("Failed to send OpsGenie alert for breaker reset: %v", err)
+					}
+				}()
+			}
 		} else {
 			return false
 		}
@@ -100,7 +156,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	latencyPercentile := b.latencyWindow.Percentile(b.config.Percentile)
 	memoryStatus := b.MemoryOK()
 
-	// Check if latency is above threshold
+	// Check if latency is above the threshold
 	latencyAboveThreshold := latencyPercentile > b.config.LatencyThreshold
 
 	// Logging for debugging
@@ -117,7 +173,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	// For latency issues, check if we need to consider trend analysis
 	if latencyAboveThreshold {
 		if b.config.TrendAnalysisEnabled {
-			// Only trigger if there's a positive trend in latencies or if latencies
+			// Only trigger if there's a positive trend in latencies, or if latencies
 			// have been consistently high for a while (plateau)
 			hasTrend := b.latencyWindow.HasPositiveTrend(b.config.TrendAnalysisMinSampleCount)
 			b.logger.TrendAnalysisInfo(hasTrend)
@@ -127,10 +183,10 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 				shouldTrigger = true
 			} else {
 				// Check for a plateau - latencies consistently above threshold
-				// We consider it a plateau if we have at least 5 samples and they're all above threshold
+				// We consider it a plateau if we have at least 5 samples, and they're all above threshold
 				latencies := b.latencyWindow.GetRecentLatencies()
 
-				// If we have enough samples and they're all high, consider it a plateau
+				// If we have enough samples, and they're all high, consider it a plateau
 				if len(latencies) >= 5 {
 					allAboveThreshold := true
 					for _, lat := range latencies {
@@ -151,7 +207,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 				}
 			}
 		} else {
-			// No trend analysis, trigger based on threshold only
+			// No trend analysis, trigger based on a threshold only
 			shouldTrigger = true
 		}
 	}
@@ -160,6 +216,15 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 		b.triggered = true
 		b.lastTripTime = time.Now()
 		b.logger.BreakerTriggered(latencyPercentile, memoryStatus, b.config.TrendAnalysisEnabled, b.config.WaitTime)
+
+		// Send OpsGenie alert for breaker triggered
+		if b.opsGenieClient != nil && b.config.OpsGenie != nil && b.config.OpsGenie.Enabled {
+			go func() {
+				if err := b.opsGenieClient.SendBreakerOpenAlert(latencyPercentile, memoryStatus, b.config.WaitTime); err != nil {
+					b.logger.Logf("Failed to send OpsGenie alert for breaker open: %v", err)
+				}
+			}()
+		}
 	}
 }
 
@@ -182,10 +247,23 @@ func (b *BreakerDriver) LatenciesAboveThreshold(threshold int64) []int64 {
 func (b *BreakerDriver) Reset() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	// Only send reset alert if previously triggered
+	wasTriggered := b.triggered
+
 	b.triggered = false
 	b.lastTripTime = time.Time{}
 	b.enabled = true
 	b.latencyWindow.Reset()
+
+	// If the breaker was previously triggered, send a reset alert
+	if wasTriggered && b.opsGenieClient != nil && b.config.OpsGenie != nil && b.config.OpsGenie.Enabled {
+		go func() {
+			if err := b.opsGenieClient.SendBreakerResetAlert(); err != nil {
+				b.logger.Logf("Failed to send OpsGenie alert for manual breaker reset: %v", err)
+			}
+		}()
+	}
 }
 
 // LatencyOK Return true if the LatencyWindow is OK
