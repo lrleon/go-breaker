@@ -57,18 +57,9 @@ func NewBreaker(config *Config) Breaker {
 	// Create a new OpsGenie client if configuration is provided
 	var opsGenieClient *OpsGenieClient
 	if config.OpsGenie != nil {
-		opsGenieClient = NewOpsGenieClient(config.OpsGenie)
-		// Initialize the client in a goroutine to avoid blocking
-		if config.OpsGenie.Enabled {
-			go func() {
-				if err := opsGenieClient.Initialize(); err != nil {
-					// Just log the error, don't fail the breaker creation
-					// The circuit breaker will still work without OpsGenie
-					logger := NewLogger("OpsGenie")
-					logger.Logf("Failed to initialize OpsGenie: %v", err)
-				}
-			}()
-		}
+		// Use the singleton pattern to get the OpsGenie client
+		// This ensures that only one instance of the OpsGenie client is created
+		opsGenieClient = GetOpsGenieClient(config.OpsGenie)
 	}
 
 	return &BreakerDriver{
@@ -266,7 +257,7 @@ func (b *BreakerDriver) Reset() {
 	}
 }
 
-// LatencyOK Return true if the LatencyWindow is OK
+// LatencyOK reports whether the current latency percentile is below the configured threshold
 func (b *BreakerDriver) LatencyOK() bool {
 	return b.latencyWindow.BelowThreshold(b.config.LatencyThreshold)
 }

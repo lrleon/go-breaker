@@ -325,7 +325,22 @@ func (b *BreakerAPI) GetMemoryLimit(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"memory_limit": MemoryLimit})
 }
 
+type ResetRequest struct {
+	Confirm bool `json:"confirm" binding:"required"`
+}
+
 func (b *BreakerAPI) Reset(ctx *gin.Context) {
+	var req ResetRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format", "details": err.Error()})
+		return
+	}
+
+	if !req.Confirm {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Reset not confirmed", "message": "Set confirm:true to reset the breaker"})
+		return
+	}
+
 	b.Driver.Reset()
 	ctx.JSON(http.StatusOK, gin.H{"message": "Breaker reset"})
 }

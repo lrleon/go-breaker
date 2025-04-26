@@ -169,6 +169,14 @@ path = "/breaker/reset"
 method = "POST"
 description =  "Reset the breaker"
 
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "confirm": "boolean"
+}
+'''
+
 [[endpoints]]
 name = "Get Circuit Breaker Status"
 path = "/breaker/status"
