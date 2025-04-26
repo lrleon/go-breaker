@@ -58,7 +58,11 @@ func main() {
 
 	if verbose {
 		fmt.Println("📡 Sending request to OpsGenie API...")
-		fmt.Printf("   Using API Key: %s****\n", apiKey[:4])
+		if len(apiKey) >= 4 {
+			fmt.Printf("   Using API Key: %s****\n", apiKey[:4])
+		} else {
+			fmt.Println("   Using API Key: **** (API key is too short to display the first 4 characters)")
+		}
 	}
 
 	resp, err := alertClient.List(ctx, listReq)
