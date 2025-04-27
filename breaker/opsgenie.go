@@ -2,7 +2,7 @@ package breaker
 
 import (
 	"context"
-	"errors"
+
 	"fmt"
 	"log"
 	"os"
@@ -18,6 +18,7 @@ const (
 	EnvOpsGenieAPIKey = "OPSGENIE_API_KEY"
 	EnvOpsGenieRegion = "OPSGENIE_REGION"
 	EnvOpsGenieAPIURL = "OPSGENIE_API_URL"
+	EnvEnvironment    = "APP_ENVIRONMENT" // Environment variable to determine the current environment
 )
 
 // MemoryStatus represents the current memory status of the application
@@ -56,6 +57,7 @@ type OpsGenieClient struct {
 	lastAlertTime map[string]time.Time // Map to track when each alert type was last sent
 	initialized   bool
 	mutex         sync.RWMutex // Mutex to protect concurrent access to the lastAlertTime map
+	environment   Environment  // Current runtime environment
 }
 
 // NewOpsGenieClient creates a new OpsGenie client with the given configuration
@@ -64,10 +66,40 @@ func NewOpsGenieClient(config *OpsGenieConfig) *OpsGenieClient {
 		config = &OpsGenieConfig{Enabled: false}
 	}
 
+	// Determine the current environment only if we're using environments
+	var env Environment
+	if config.UseEnvironments {
+		env = determineEnvironment()
+	}
+
 	return &OpsGenieClient{
 		config:        config,
 		lastAlertTime: make(map[string]time.Time),
 		initialized:   false,
+		environment:   env,
+	}
+}
+
+// determineEnvironment detects the current runtime environment
+func determineEnvironment() Environment {
+	// Check environment variable first
+	envValue := os.Getenv(EnvEnvironment)
+
+	switch envValue {
+	case string(EnvDevelopment):
+		return EnvDevelopment
+	case string(EnvUAT):
+		return EnvUAT
+	case string(EnvProduction):
+		return EnvProduction
+	default:
+		// Default to development if not specified
+		if envValue == "" {
+			log.Println("Environment not specified, defaulting to development")
+		} else {
+			log.Printf("Unknown environment '%s', defaulting to development", envValue)
+		}
+		return EnvDevelopment
 	}
 }
 
@@ -77,8 +109,9 @@ func (o *OpsGenieClient) Initialize() error {
 		return fmt.Errorf("OpsGenieClient is nil")
 	}
 
-	if !o.config.Enabled {
-		log.Println("OpsGenie integration is disabled")
+	// Check if alerts are enabled for the current environment
+	if !o.isEnabledForEnvironment() {
+		log.Printf("OpsGenie integration is disabled for environment: %s", o.environment)
 		return nil
 	}
 
@@ -137,6 +170,87 @@ func (o *OpsGenieClient) Initialize() error {
 	log.Println("Successfully connected to OpsGenie API")
 	o.initialized = true
 	return nil
+}
+
+// isEnabledForEnvironment checks if OpsGenie is enabled for the current environment
+func (o *OpsGenieClient) isEnabledForEnvironment() bool {
+	if o == nil || o.config == nil {
+		return false
+	}
+
+	// If we're not using environments, just use the global enabled flag
+	if !o.config.UseEnvironments {
+		return o.config.Enabled
+	}
+
+	// Check if we have environment-specific settings
+	if o.config.EnvironmentSettings != nil {
+		if envConfig, exists := o.config.EnvironmentSettings[string(o.environment)]; exists {
+			return envConfig.Enabled
+		}
+	}
+
+	// Fall back to global enabled setting
+	return o.config.Enabled
+}
+
+// getPriorityForEnvironment returns the appropriate priority for the current environment
+func (o *OpsGenieClient) getPriorityForEnvironment() alert.Priority {
+	if o == nil || o.config == nil {
+		return alert.P3 // Default to P3 if no config
+	}
+
+	// If we're not using environments, just use the global priority
+	var priorityStr string
+	if !o.config.UseEnvironments {
+		priorityStr = o.config.Priority
+	} else {
+		// Check if we have environment-specific settings
+		if o.config.EnvironmentSettings != nil {
+			if envConfig, exists := o.config.EnvironmentSettings[string(o.environment)]; exists && envConfig.Priority != "" {
+				priorityStr = envConfig.Priority
+			}
+		}
+
+		// Fall back to global priority
+		if priorityStr == "" && o.config.Priority != "" {
+			priorityStr = o.config.Priority
+		}
+
+		// If still empty, default based on environment
+		if priorityStr == "" {
+			switch o.environment {
+			case EnvProduction:
+				priorityStr = "P1" // Critical for production
+			case EnvUAT:
+				priorityStr = "P3" // Medium for UAT
+			default:
+				priorityStr = "P5" // Low for development
+			}
+		}
+	}
+
+	// If priorityStr is still empty at this point, use a default
+	if priorityStr == "" {
+		priorityStr = "P3"
+	}
+
+	// Convert string to alert.Priority
+	switch priorityStr {
+	case "P1":
+		return alert.P1
+	case "P2":
+		return alert.P2
+	case "P3":
+		return alert.P3
+	case "P4":
+		return alert.P4
+	case "P5":
+		return alert.P5
+	default:
+		log.Printf("Invalid priority '%s', defaulting to P3", priorityStr)
+		return alert.P3
+	}
 }
 
 // TestConnection tests the connection to OpsGenie by listing alerts
@@ -288,273 +402,291 @@ func (o *OpsGenieClient) getAPIIdentifier() string {
 	return o.config.Source
 }
 
+// memoryStatusString returns a string representation of memory status
+func memoryStatusString(memoryOK bool) string {
+	if memoryOK {
+		return "OK"
+	}
+	return "THRESHOLD EXCEEDED"
+}
+
 // SendBreakerOpenAlert sends an alert when the circuit breaker opens
 func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, waitTime int) error {
-	if o == nil || !o.initialized {
-		return errors.New("OpsGenie client not initialized")
+	alertType := "circuit_breaker_open"
+
+	// Check if OpsGenie is properly initialized
+	if !o.IsInitialized() {
+		return fmt.Errorf("OpsGenie client not initialized")
 	}
 
+	// Check if this type of alert is enabled in the config
 	if !o.config.TriggerOnOpen {
+		log.Printf("Breaker open alerts are disabled in config")
 		return nil
 	}
 
-	// Check if we've sent this alert too recently
-	if o.isOnCooldown("breaker_open") {
+	// Check if we're in a cooldown period for this alert type
+	if o.isOnCooldown(alertType) {
+		log.Printf("Skipping alert for %s due to cooldown period", alertType)
 		return nil
 	}
 
-	// Get API identifier for the message
-	apiID := o.getAPIIdentifier()
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Create request
+	// Begin building the alert message
+	apiIdentifier := o.getAPIIdentifier()
+
+	message := fmt.Sprintf("Circuit Breaker has OPENED for %s", apiIdentifier)
+	description := fmt.Sprintf(
+		"The circuit breaker has been triggered and is now OPEN for %s.\n\n"+
+			"- Latency: %d ms\n"+
+			"- Memory Status: %s\n"+
+			"- Waiting Time: %d seconds before attempting reset\n\n"+
+			"%s",
+		apiIdentifier,
+		latency,
+		memoryStatusString(memoryOK),
+		waitTime,
+		o.buildAPIInfoDetails(),
+	)
+
+	// Create the request
 	req := &alert.CreateAlertRequest{
-		Message:     fmt.Sprintf("[ALERT] Circuit Breaker Opened for %s", apiID),
-		Description: fmt.Sprintf("The circuit breaker for %s has been triggered due to high latency or memory usage. All requests will be blocked for %d seconds or until manually reset.", apiID, waitTime),
-		Priority:    alert.Priority(o.config.Priority),
-		Source:      o.config.Source,
-		Tags:        append(o.config.Tags, "circuit-breaker-open"),
-	}
-
-	// Add API details to description if available
-	apiDetails := o.buildAPIInfoDetails()
-	if apiDetails != "" {
-		req.Description += "\n\n=== API INFORMATION ===\n" + apiDetails
-	}
-
-	// Add latency and memory metrics if enabled
-	if o.config.IncludeLatencyMetrics {
-		req.Description += fmt.Sprintf("\n\nLatency: %d ms (above threshold)", latency)
-	}
-
-	if o.config.IncludeMemoryMetrics {
-		memStatus := "OK"
-		if !memoryOK {
-			memStatus = "EXCEEDED"
-		}
-		req.Description += fmt.Sprintf("\nMemory Status: %s", memStatus)
-	}
-
-	// Add team assignment if configured
-	if o.config.Team != "" {
-		req.Responders = []alert.Responder{
+		Message:     message,
+		Description: description,
+		Responders: []alert.Responder{
 			{
 				Type: "team",
 				Name: o.config.Team,
 			},
-		}
+		},
+		Tags:     o.config.Tags,
+		Entity:   apiIdentifier,
+		Source:   o.config.Source,
+		Priority: o.getPriorityForEnvironment(), // Use environment-specific priority
 	}
 
-	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	// Send the alert
-	result, err := o.alertClient.Create(ctx, req)
+	log.Printf("Sending circuit breaker OPEN alert to OpsGenie with priority: %s", req.Priority)
+	resp, err := o.alertClient.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
 	}
 
-	// Record when we sent this alert
-	o.recordAlert("breaker_open")
+	// Record the alert time for cooldown
+	o.recordAlert(alertType)
 
-	log.Printf("OpsGenie alert sent successfully. RequestID: %s", result.RequestId)
+	log.Printf("Successfully sent circuit breaker OPEN alert to OpsGenie. RequestID: %s", resp.RequestId)
 	return nil
 }
 
 // SendBreakerResetAlert sends an alert when the circuit breaker resets
 func (o *OpsGenieClient) SendBreakerResetAlert() error {
-	if o == nil || !o.initialized {
-		return errors.New("OpsGenie client not initialized")
+	alertType := "circuit_breaker_reset"
+
+	// Check if OpsGenie is properly initialized
+	if !o.IsInitialized() {
+		return fmt.Errorf("OpsGenie client not initialized")
 	}
 
+	// Check if this type of alert is enabled in the config
 	if !o.config.TriggerOnReset {
+		log.Printf("Breaker reset alerts are disabled in config")
 		return nil
 	}
 
-	// Check if we've sent this alert too recently
-	if o.isOnCooldown("breaker_reset") {
+	// Check if we're in a cooldown period for this alert type
+	if o.isOnCooldown(alertType) {
+		log.Printf("Skipping alert for %s due to cooldown period", alertType)
 		return nil
 	}
 
-	// Get API identifier for the message
-	apiID := o.getAPIIdentifier()
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Create request
+	// Begin building the alert message
+	apiIdentifier := o.getAPIIdentifier()
+
+	message := fmt.Sprintf("Circuit Breaker has RESET for %s", apiIdentifier)
+	description := fmt.Sprintf(
+		"The circuit breaker has been reset and is now CLOSED for %s.\n\n"+
+			"Requests are now being processed normally.\n\n"+
+			"%s",
+		apiIdentifier,
+		o.buildAPIInfoDetails(),
+	)
+
+	// Create the request
 	req := &alert.CreateAlertRequest{
-		Message:     fmt.Sprintf("[RESOLVED] Circuit Breaker Reset for %s", apiID),
-		Description: fmt.Sprintf("The circuit breaker for %s has been reset. Traffic is now flowing normally.", apiID),
-		Priority:    alert.Priority(o.config.Priority),
-		Source:      o.config.Source,
-		Tags:        append(o.config.Tags, "circuit-breaker-reset"),
-	}
-
-	// Add API details to description if available
-	apiDetails := o.buildAPIInfoDetails()
-	if apiDetails != "" {
-		req.Description += "\n\n=== API INFORMATION ===\n" + apiDetails
-	}
-
-	// Add system information if enabled
-	if o.config.IncludeSystemInfo {
-		req.Description += "\n\nThe system appears to have recovered and latency is back to normal levels."
-	}
-
-	// Add team assignment if configured
-	if o.config.Team != "" {
-		req.Responders = []alert.Responder{
+		Message:     message,
+		Description: description,
+		Responders: []alert.Responder{
 			{
 				Type: "team",
 				Name: o.config.Team,
 			},
-		}
+		},
+		Tags:     o.config.Tags,
+		Entity:   apiIdentifier,
+		Source:   o.config.Source,
+		Priority: o.getPriorityForEnvironment(), // Use environment-specific priority
 	}
 
-	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	// Send the alert
-	result, err := o.alertClient.Create(ctx, req)
+	log.Printf("Sending circuit breaker RESET alert to OpsGenie with priority: %s", req.Priority)
+	resp, err := o.alertClient.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
 	}
 
-	// Record when we sent this alert
-	o.recordAlert("breaker_reset")
+	// Record the alert time for cooldown
+	o.recordAlert(alertType)
 
-	log.Printf("OpsGenie alert sent successfully. RequestID: %s", result.RequestId)
+	log.Printf("Successfully sent circuit breaker RESET alert to OpsGenie. RequestID: %s", resp.RequestId)
 	return nil
 }
 
 // SendMemoryThresholdAlert sends an alert when memory usage exceeds the threshold
 func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) error {
-	if o == nil || !o.initialized || memoryStatus == nil {
-		return errors.New("OpsGenie client not initialized or invalid memory status")
+	alertType := "memory_threshold"
+
+	// Check if OpsGenie is properly initialized
+	if !o.IsInitialized() {
+		return fmt.Errorf("OpsGenie client not initialized")
 	}
 
+	// Check if this type of alert is enabled in the config
 	if !o.config.TriggerOnMemory {
+		log.Printf("Memory threshold alerts are disabled in config")
 		return nil
 	}
 
-	// Check if we've sent this alert too recently
-	if o.isOnCooldown("memory_threshold") {
+	// Check if we're in a cooldown period for this alert type
+	if o.isOnCooldown(alertType) {
+		log.Printf("Skipping alert for %s due to cooldown period", alertType)
 		return nil
 	}
 
-	// Get API identifier for the message
-	apiID := o.getAPIIdentifier()
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Create request
+	// Begin building the alert message
+	apiIdentifier := o.getAPIIdentifier()
+
+	message := fmt.Sprintf("Memory Threshold Exceeded for %s", apiIdentifier)
+	description := fmt.Sprintf(
+		"The memory usage has exceeded the threshold for %s.\n\n"+
+			"- Current Memory Usage: %.2f%%\n"+
+			"- Threshold: %.2f%%\n"+
+			"- Used Memory: %d bytes\n"+
+			"- Total Memory: %d bytes\n\n"+
+			"%s",
+		apiIdentifier,
+		memoryStatus.CurrentUsage,
+		memoryStatus.Threshold,
+		memoryStatus.UsedMemory,
+		memoryStatus.TotalMemory,
+		o.buildAPIInfoDetails(),
+	)
+
+	// Create the request
 	req := &alert.CreateAlertRequest{
-		Message:     fmt.Sprintf("[WARNING] High Memory Usage for %s", apiID),
-		Description: fmt.Sprintf("Memory usage for %s has exceeded the threshold of %.1f%%", apiID, memoryStatus.Threshold),
-		Priority:    alert.Priority(o.config.Priority),
-		Source:      o.config.Source,
-		Tags:        append(o.config.Tags, "memory-threshold"),
-	}
-
-	// Add API details to description if available
-	apiDetails := o.buildAPIInfoDetails()
-	if apiDetails != "" {
-		req.Description += "\n\n=== API INFORMATION ===\n" + apiDetails
-	}
-
-	// Add memory metrics if enabled
-	if o.config.IncludeMemoryMetrics /* && memoryStatus != nil */ {
-		req.Description += fmt.Sprintf("\n\nCurrent Memory Usage: %.1f%%", memoryStatus.CurrentUsage)
-		req.Description += fmt.Sprintf("\nMemory Threshold: %.1f%%", memoryStatus.Threshold)
-		req.Description += fmt.Sprintf("\nTotal Memory: %d MB", memoryStatus.TotalMemory/(1024*1024))
-		req.Description += fmt.Sprintf("\nUsed Memory: %d MB", memoryStatus.UsedMemory/(1024*1024))
-	}
-
-	// Add team assignment if configured
-	if o.config.Team != "" {
-		req.Responders = []alert.Responder{
+		Message:     message,
+		Description: description,
+		Responders: []alert.Responder{
 			{
 				Type: "team",
 				Name: o.config.Team,
 			},
-		}
+		},
+		Tags:     o.config.Tags,
+		Entity:   apiIdentifier,
+		Source:   o.config.Source,
+		Priority: o.getPriorityForEnvironment(), // Use environment-specific priority
 	}
 
-	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	// Send the alert
-	result, err := o.alertClient.Create(ctx, req)
+	log.Printf("Sending memory threshold alert to OpsGenie with priority: %s", req.Priority)
+	resp, err := o.alertClient.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
 	}
 
-	// Record when we sent this alert
-	o.recordAlert("memory_threshold")
+	// Record the alert time for cooldown
+	o.recordAlert(alertType)
 
-	log.Printf("OpsGenie alert sent successfully. RequestID: %s", result.RequestId)
+	log.Printf("Successfully sent memory threshold alert to OpsGenie. RequestID: %s", resp.RequestId)
 	return nil
 }
 
 // SendLatencyThresholdAlert sends an alert when latency exceeds the threshold
 func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64) error {
-	if o == nil || !o.initialized {
-		return errors.New("OpsGenie client not initialized")
+	alertType := "latency_threshold"
+
+	// Check if OpsGenie is properly initialized
+	if !o.IsInitialized() {
+		return fmt.Errorf("OpsGenie client not initialized")
 	}
 
+	// Check if this type of alert is enabled in the config
 	if !o.config.TriggerOnLatency {
+		log.Printf("Latency threshold alerts are disabled in config")
 		return nil
 	}
 
-	// Check if we've sent this alert too recently
-	if o.isOnCooldown("latency_threshold") {
+	// Check if we're in a cooldown period for this alert type
+	if o.isOnCooldown(alertType) {
+		log.Printf("Skipping alert for %s due to cooldown period", alertType)
 		return nil
 	}
 
-	// Get API identifier for the message
-	apiID := o.getAPIIdentifier()
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Create request
+	// Begin building the alert message
+	apiIdentifier := o.getAPIIdentifier()
+
+	message := fmt.Sprintf("Latency Threshold Exceeded for %s", apiIdentifier)
+	description := fmt.Sprintf(
+		"The latency has exceeded the threshold for %s.\n\n"+
+			"- Current Latency: %d ms\n\n"+
+			"%s",
+		apiIdentifier,
+		latency,
+		o.buildAPIInfoDetails(),
+	)
+
+	// Create the request
 	req := &alert.CreateAlertRequest{
-		Message:     fmt.Sprintf("[WARNING] High Latency for %s", apiID),
-		Description: fmt.Sprintf("Request latency for %s has exceeded the configured threshold", apiID),
-		Priority:    alert.Priority(o.config.Priority),
-		Source:      o.config.Source,
-		Tags:        append(o.config.Tags, "latency-threshold"),
-	}
-
-	// Add API details to description if available
-	apiDetails := o.buildAPIInfoDetails()
-	if apiDetails != "" {
-		req.Description += "\n\n=== API INFORMATION ===\n" + apiDetails
-	}
-
-	// Add latency metrics if enabled
-	if o.config.IncludeLatencyMetrics {
-		req.Description += fmt.Sprintf("\n\nCurrent Latency: %d ms", latency)
-	}
-
-	// Add team assignment if configured
-	if o.config.Team != "" {
-		req.Responders = []alert.Responder{
+		Message:     message,
+		Description: description,
+		Responders: []alert.Responder{
 			{
 				Type: "team",
 				Name: o.config.Team,
 			},
-		}
+		},
+		Tags:     o.config.Tags,
+		Entity:   apiIdentifier,
+		Source:   o.config.Source,
+		Priority: o.getPriorityForEnvironment(), // Use environment-specific priority
 	}
 
-	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	// Send the alert
-	result, err := o.alertClient.Create(ctx, req)
+	log.Printf("Sending latency threshold alert to OpsGenie with priority: %s", req.Priority)
+	resp, err := o.alertClient.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
 	}
 
-	// Record when we sent this alert
-	o.recordAlert("latency_threshold")
+	// Record the alert time for cooldown
+	o.recordAlert(alertType)
 
-	log.Printf("OpsGenie alert sent successfully. RequestID: %s", result.RequestId)
+	log.Printf("Successfully sent latency threshold alert to OpsGenie. RequestID: %s", resp.RequestId)
 	return nil
 }
