@@ -9,22 +9,24 @@ import (
 
 // OpsGenieConfig represents the OpsGenie integration configuration
 type OpsGenieConfig struct {
-	Enabled               bool     `toml:"enabled"`                      // Enable OpsGenie alerts
-	APIKey                string   `toml:"api_key"`                      // OpsGenie API key
-	Region                string   `toml:"region"`                       // OpsGenie region: "us" or "eu"
-	APIURL                string   `toml:"api_url"`                      // Custom API URL (optional)
-	Priority              string   `toml:"priority"`                     // Default priority (P1-P5)
-	Source                string   `toml:"source"`                       // Source identifier
-	Team                  string   `toml:"team"`                         // Team to assign alerts to
-	Tags                  []string `toml:"tags"`                         // Alert tags
-	TriggerOnOpen         bool     `toml:"trigger_on_breaker_open"`      // Alert when breaker opens
-	TriggerOnReset        bool     `toml:"trigger_on_breaker_reset"`     // Alert when breaker resets
-	TriggerOnMemory       bool     `toml:"trigger_on_memory_threshold"`  // Alert on memory threshold breach
-	TriggerOnLatency      bool     `toml:"trigger_on_latency_threshold"` // Alert on latency threshold breach
-	IncludeLatencyMetrics bool     `toml:"include_latency_metrics"`      // Include latency metrics in alert
-	IncludeMemoryMetrics  bool     `toml:"include_memory_metrics"`       // Include memory metrics in alert
-	IncludeSystemInfo     bool     `toml:"include_system_info"`          // Include system info in alert
-	AlertCooldownSeconds  int      `toml:"alert_cooldown_seconds"`       // Minimum time between alerts
+	Enabled               bool                    `toml:"enabled"`                      // Enable OpsGenie alerts
+	APIKey                string                  `toml:"api_key"`                      // OpsGenie API key
+	Region                string                  `toml:"region"`                       // OpsGenie region: "us" or "eu"
+	APIURL                string                  `toml:"api_url"`                      // Custom API URL (optional)
+	Priority              string                  `toml:"priority"`                     // Default priority (P1-P5)
+	Source                string                  `toml:"source"`                       // Source identifier
+	Team                  string                  `toml:"team"`                         // Team to assign alerts to
+	Tags                  []string                `toml:"tags"`                         // Alert tags
+	TriggerOnOpen         bool                    `toml:"trigger_on_breaker_open"`      // Alert when breaker opens
+	TriggerOnReset        bool                    `toml:"trigger_on_breaker_reset"`     // Alert when breaker resets
+	TriggerOnMemory       bool                    `toml:"trigger_on_memory_threshold"`  // Alert on memory threshold breach
+	TriggerOnLatency      bool                    `toml:"trigger_on_latency_threshold"` // Alert on latency threshold breach
+	IncludeLatencyMetrics bool                    `toml:"include_latency_metrics"`      // Include latency metrics in alert
+	IncludeMemoryMetrics  bool                    `toml:"include_memory_metrics"`       // Include memory metrics in alert
+	IncludeSystemInfo     bool                    `toml:"include_system_info"`          // Include system info in alert
+	AlertCooldownSeconds  int                     `toml:"alert_cooldown_seconds"`       // Minimum time between alerts
+	EnvironmentSettings   map[string]EnvOpsConfig `toml:"environment_settings"`         // Environment-specific settings
+	UseEnvironments       bool                    `toml:"use_environments"`             // Whether to use environment-specific settings
 
 	// API Information
 	APINamespace        string            `toml:"api_namespace"`         // Namespace/environment of the API (e.g., production, staging)
@@ -37,6 +39,21 @@ type OpsGenieConfig struct {
 	APIPriority         string            `toml:"api_priority"`          // Business priority of the API (critical, high, medium, low)
 	APICustomAttributes map[string]string `toml:"api_custom_attributes"` // Any custom attributes for the API
 }
+
+// EnvOpsConfig contains environment-specific OpsGenie settings
+type EnvOpsConfig struct {
+	Enabled  bool   `toml:"enabled"`  // Whether alerts are enabled in this environment
+	Priority string `toml:"priority"` // Alert priority for this environment (P1-P5)
+}
+
+// Environment types for the application
+type Environment string
+
+const (
+	EnvDevelopment Environment = "dev"
+	EnvUAT         Environment = "uat"
+	EnvProduction  Environment = "production"
+)
 
 // Config This Config ios read from a toml file
 type Config struct {
