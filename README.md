@@ -5,6 +5,22 @@
 
 A circuit breaker implementation in Go that helps prevent system overload by monitoring memory usage and latency metrics, automatically tripping when thresholds are exceeded.
 
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Interface](#interface)
+- [Basic Usage](#basic-usage)
+- [Server Integration Example](#server-integration-example)
+- [OpsGenie Integration](#opsgenie-integration)
+  - [Configuration](#configuration)
+  - [Environment Variables](#environment-variables)
+  - [Usage with OpsGenie](#usage-with-opsgenie)
+- [General Configuration](#general-configuration)
+- [HTTP API Endpoints](#http-api-endpoints)
+- [Utility Scripts](#utility-scripts)
+- [License](#license)
+
 ## Features
 
 - Memory usage monitoring with configurable thresholds
@@ -204,7 +220,7 @@ Each alert contains:
 
 For more details, see the [TOML Configuration Guide](TOML_CONFIG.md).
 
-## Configuration
+## General Configuration
 
 The `Config` struct configures the breaker with the following fields:
 
