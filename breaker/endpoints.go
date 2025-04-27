@@ -357,12 +357,14 @@ type BreakerStatus struct {
 	CurrentMemoryUsage int64   `json:"current_memory_usage_mb"`
 	MemoryThreshold    float64 `json:"memory_threshold_percent"`
 	TotalMemoryMB      int64   `json:"total_memory_mb"`
+	MemoryUsagePercent float64 `json:"memory_usage_percent"`
 
 	// Latency metrics
-	LatencyOK         bool    `json:"latency_ok"`
-	CurrentPercentile int64   `json:"current_percentile_ms"`
-	LatencyThreshold  int64   `json:"latency_threshold_ms"`
-	PercentileValue   float64 `json:"percentile_value"`
+	LatencyOK             bool    `json:"latency_ok"`
+	CurrentPercentile     int64   `json:"current_percentile_ms"`
+	LatencyThreshold      int64   `json:"latency_threshold_ms"`
+	LatencyPercentOfLimit float64 `json:"latency_percent_of_threshold"`
+	PercentileValue       float64 `json:"percentile_value"`
 
 	// Configuration
 	LatencyWindowSize int `json:"latency_window_size"`
@@ -423,9 +425,11 @@ func (b *BreakerAPI) GetBreakerStatus(ctx *gin.Context) {
 		CurrentMemoryUsage:          currentMemoryUsageMB,
 		MemoryThreshold:             driver.config.MemoryThreshold,
 		TotalMemoryMB:               TotalMemoryMB(),
+		MemoryUsagePercent:          float64(currentMemoryUsageMB) / float64(TotalMemoryMB()) * 100,
 		LatencyOK:                   driver.LatencyOK(),
 		CurrentPercentile:           latencyPercentile,
 		LatencyThreshold:            driver.config.LatencyThreshold,
+		LatencyPercentOfLimit:       float64(latencyPercentile) / float64(driver.config.LatencyThreshold) * 100,
 		PercentileValue:             driver.config.Percentile,
 		LatencyWindowSize:           driver.config.LatencyWindowSize,
 		WaitTime:                    driver.config.WaitTime,
