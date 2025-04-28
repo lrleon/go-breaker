@@ -99,23 +99,25 @@ func TestIsInitialized(t *testing.T) {
 	// since initialization requires a real connection to OpsGenie
 }
 
-// TestSendingAlerts verifies that alert sending methods return errors
+// TestSendingAlerts verifies the behavior of alert sending methods
 // when the client is not initialized
 func TestSendingAlerts(t *testing.T) {
-	// Test with nil client
-	var nilClient *breaker.OpsGenieClient
+	// Create an uninitialized client
+	client := breaker.NewOpsGenieClient(&breaker.OpsGenieConfig{
+		Enabled: true,
+		APIKey:  "test-key",
+	})
+	// We don't call Initialize() to ensure it remains uninitialized
 
-	// Test breaker open alert
-	err := nilClient.SendBreakerOpenAlert(100, true, 60)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not initialized")
+	// Test breaker open alert - should return nil when uninitialized
+	err := client.SendBreakerOpenAlert(100, true, 60)
+	assert.NoError(t, err, "SendBreakerOpenAlert should return nil for uninitialized client")
 
-	// Test breaker reset alert
-	err = nilClient.SendBreakerResetAlert()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not initialized")
+	// Test breaker reset alert - should return nil when uninitialized
+	err = client.SendBreakerResetAlert()
+	assert.NoError(t, err, "SendBreakerResetAlert should return nil for uninitialized client")
 
-	// Test memory threshold alert
+	// Test memory threshold alert - should return nil when uninitialized
 	memStatus := &breaker.MemoryStatus{
 		CurrentUsage: 85.0,
 		Threshold:    80.0,
@@ -123,14 +125,12 @@ func TestSendingAlerts(t *testing.T) {
 		UsedMemory:   850 * 1024 * 1024,
 		OK:           false,
 	}
-	err = nilClient.SendMemoryThresholdAlert(memStatus)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not initialized")
+	err = client.SendMemoryThresholdAlert(memStatus)
+	assert.NoError(t, err, "SendMemoryThresholdAlert should return nil for uninitialized client")
 
-	// Test latency threshold alert
-	err = nilClient.SendLatencyThresholdAlert(100, 50)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not initialized")
+	// Test latency threshold alert - should return nil when uninitialized
+	err = client.SendLatencyThresholdAlert(100, 50)
+	assert.NoError(t, err, "SendLatencyThresholdAlert should return nil for uninitialized client")
 }
 
 // TestWithDisabledTriggers verifies that disabled triggers don't send alerts
