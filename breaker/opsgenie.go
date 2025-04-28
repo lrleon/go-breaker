@@ -317,7 +317,8 @@ func (o *OpsGenieClient) isOnCooldown(alertType string) bool {
 	timeSinceLastAlert := time.Since(lastSent)
 	isOnCooldown := timeSinceLastAlert < cooldownDuration
 
-	log.Printf("Alert %s - Last sent: %v, Cooldown duration: %v, Time since last: %v, On cooldown: %v",
+	// Add more detailed logging about cooldown status
+	log.Printf("COOLDOWN CHECK: Alert %s - Last sent: %v, Cooldown duration: %v, Time since last: %v, On cooldown: %v",
 		alertType, lastSent.Format(time.RFC3339), cooldownDuration, timeSinceLastAlert, isOnCooldown)
 
 	return isOnCooldown
@@ -336,7 +337,14 @@ func (o *OpsGenieClient) recordAlert(alertType string) {
 
 	now := time.Now()
 	o.lastAlertTime[alertType] = now
-	log.Printf("Recorded alert %s at %v", alertType, now.Format(time.RFC3339))
+	log.Printf("COOLDOWN START: Recorded alert %s at %v with %d second cooldown",
+		alertType, now.Format(time.RFC3339), o.config.AlertCooldownSeconds)
+}
+
+// Helper function to guarantee alert uniqueness by API identifier and alert type
+func (o *OpsGenieClient) createUniqueAlertIdentifier(alertType string) string {
+	apiID := o.getAPIIdentifier()
+	return fmt.Sprintf("%s-%s", apiID, alertType)
 }
 
 // buildAPIInfoDetails creates a structured description of the API for alert details
@@ -428,7 +436,7 @@ func memoryStatusString(memoryOK bool) string {
 
 // SendBreakerOpenAlert sends an alert when the circuit breaker opens
 func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, waitTime int) error {
-	alertType := "circuit_breaker_open"
+	alertType := o.createUniqueAlertIdentifier("circuit_breaker_open")
 
 	// Check if OpsGenie is properly initialized
 	if !o.IsInitialized() {
@@ -500,7 +508,7 @@ func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, wait
 
 // SendBreakerResetAlert sends an alert when the circuit breaker resets
 func (o *OpsGenieClient) SendBreakerResetAlert() error {
-	alertType := "circuit_breaker_reset"
+	alertType := o.createUniqueAlertIdentifier("circuit_breaker_reset")
 
 	// Check if OpsGenie is properly initialized
 	if !o.IsInitialized() {
@@ -567,7 +575,7 @@ func (o *OpsGenieClient) SendBreakerResetAlert() error {
 
 // SendMemoryThresholdAlert sends an alert when memory usage exceeds the threshold
 func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) error {
-	alertType := "memory_threshold"
+	alertType := o.createUniqueAlertIdentifier("memory_threshold")
 
 	// Check if OpsGenie is properly initialized
 	if !o.IsInitialized() {
@@ -642,7 +650,7 @@ func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) er
 
 // SendLatencyThresholdAlert sends an alert when latency exceeds the threshold
 func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64) error {
-	alertType := "latency_threshold"
+	alertType := o.createUniqueAlertIdentifier("latency_threshold")
 
 	// Check if OpsGenie is properly initialized
 	if !o.IsInitialized() {
