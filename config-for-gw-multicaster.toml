@@ -189,3 +189,84 @@ name = "Get Circuit Breaker Status"
 path = "/breaker/status"
 method = "GET"
 description =  "Get the current status of the breaker"
+
+# OpsGenie Endpoints
+
+[[endpoints]]
+name = "Get OpsGenie Status"
+path = "/breaker/opsgenie/status"
+method = "GET"
+description = "Get the current configuration and status of OpsGenie integration"
+
+[[endpoints]]
+name = "Toggle OpsGenie"
+path = "/breaker/opsgenie/toggle"
+method = "POST"
+description = "Enable or disable OpsGenie alerts"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "enabled": "boolean"
+}
+'''
+
+[[endpoints]]
+name = "Update OpsGenie Priority"
+path = "/breaker/opsgenie/priority"
+method = "POST"
+description = "Update the priority for OpsGenie alerts (P1-P5)"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "priority": "string"
+}
+'''
+
+[[endpoints]]
+name = "Update OpsGenie Triggers"
+path = "/breaker/opsgenie/triggers"
+method = "POST"
+description = "Update which events trigger OpsGenie alerts"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "trigger_on_breaker_open": "boolean?",
+  "trigger_on_breaker_reset": "boolean?",
+  "trigger_on_memory_threshold": "boolean?",
+  "trigger_on_latency_threshold": "boolean?"
+}
+'''
+
+[[endpoints]]
+name = "Update OpsGenie Tags"
+path = "/breaker/opsgenie/tags"
+method = "POST"
+description = "Update the tags for OpsGenie alerts"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "tags": "array"
+}
+'''
+
+[[endpoints]]
+name = "Update OpsGenie Cooldown"
+path = "/breaker/opsgenie/cooldown"
+method = "POST"
+description = "Update the cooldown period between OpsGenie alerts"
+
+[endpoints.body]
+content_type = "application/json"
+schema = '''
+{
+  "cooldown_seconds": "number"
+}
+'''
