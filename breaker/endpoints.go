@@ -1,6 +1,7 @@
 package breaker
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"runtime"
@@ -447,6 +448,292 @@ func (b *BreakerAPI) GetBreakerStatus(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, status)
 }
 
+// OpsGenieStatusResponse represents the current configuration and status of OpsGenie integration
+type OpsGenieStatusResponse struct {
+	Enabled               bool                    `json:"enabled"`
+	APIKey                string                  `json:"api_key,omitempty"`
+	Region                string                  `json:"region"`
+	Priority              string                  `json:"priority"`
+	Source                string                  `json:"source"`
+	Team                  string                  `json:"team"`
+	Tags                  []string                `json:"tags"`
+	TriggerOnOpen         bool                    `json:"trigger_on_breaker_open"`
+	TriggerOnReset        bool                    `json:"trigger_on_breaker_reset"`
+	TriggerOnMemory       bool                    `json:"trigger_on_memory_threshold"`
+	TriggerOnLatency      bool                    `json:"trigger_on_latency_threshold"`
+	IncludeLatencyMetrics bool                    `json:"include_latency_metrics"`
+	IncludeMemoryMetrics  bool                    `json:"include_memory_metrics"`
+	IncludeSystemInfo     bool                    `json:"include_system_info"`
+	AlertCooldownSeconds  int                     `json:"alert_cooldown_seconds"`
+	UseEnvironments       bool                    `json:"use_environments"`
+	CurrentEnvironment    string                  `json:"current_environment,omitempty"`
+	EnvironmentSettings   map[string]EnvOpsConfig `json:"environment_settings,omitempty"`
+	Initialized           bool                    `json:"initialized"`
+}
+
+// OpsGenieToggleRequest represents a request to enable or disable OpsGenie
+type OpsGenieToggleRequest struct {
+	Enabled bool `json:"enabled" binding:"required"`
+}
+
+// OpsGeniePriorityRequest represents a request to change OpsGenie priority
+type OpsGeniePriorityRequest struct {
+	Priority string `json:"priority" binding:"required"`
+}
+
+// OpsGenieTriggersRequest represents a request to update which events trigger OpsGenie alerts
+type OpsGenieTriggersRequest struct {
+	TriggerOnOpen    *bool `json:"trigger_on_breaker_open,omitempty"`
+	TriggerOnReset   *bool `json:"trigger_on_breaker_reset,omitempty"`
+	TriggerOnMemory  *bool `json:"trigger_on_memory_threshold,omitempty"`
+	TriggerOnLatency *bool `json:"trigger_on_latency_threshold,omitempty"`
+}
+
+// OpsGenieTagsRequest represents a request to update OpsGenie tags
+type OpsGenieTagsRequest struct {
+	Tags []string `json:"tags" binding:"required"`
+}
+
+// OpsGenieCooldownRequest represents a request to update the alert cooldown period
+type OpsGenieCooldownRequest struct {
+	CooldownSeconds int `json:"cooldown_seconds" binding:"required"`
+}
+
+// GetOpsGenieStatus returns the current configuration and status of OpsGenie integration
+func (b *BreakerAPI) GetOpsGenieStatus(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	// Get the OpsGenie client
+	opsgenieClient := GetOpsGenieClient(b.Config.OpsGenie)
+
+	// Prepare the response
+	response := OpsGenieStatusResponse{
+		Enabled:               b.Config.OpsGenie.Enabled,
+		Region:                b.Config.OpsGenie.Region,
+		Priority:              b.Config.OpsGenie.Priority,
+		Source:                b.Config.OpsGenie.Source,
+		Team:                  b.Config.OpsGenie.Team,
+		Tags:                  b.Config.OpsGenie.Tags,
+		TriggerOnOpen:         b.Config.OpsGenie.TriggerOnOpen,
+		TriggerOnReset:        b.Config.OpsGenie.TriggerOnReset,
+		TriggerOnMemory:       b.Config.OpsGenie.TriggerOnMemory,
+		TriggerOnLatency:      b.Config.OpsGenie.TriggerOnLatency,
+		IncludeLatencyMetrics: b.Config.OpsGenie.IncludeLatencyMetrics,
+		IncludeMemoryMetrics:  b.Config.OpsGenie.IncludeMemoryMetrics,
+		IncludeSystemInfo:     b.Config.OpsGenie.IncludeSystemInfo,
+		AlertCooldownSeconds:  b.Config.OpsGenie.AlertCooldownSeconds,
+		UseEnvironments:       b.Config.OpsGenie.UseEnvironments,
+		Initialized:           opsgenieClient.IsInitialized(),
+	}
+
+	// Only include API key hint if it's set (don't show the actual key for security)
+	if b.Config.OpsGenie.APIKey != "" {
+		response.APIKey = "********" // Mask the actual key
+	}
+
+	// Include environment information if enabled
+	if b.Config.OpsGenie.UseEnvironments {
+		response.CurrentEnvironment = string(opsgenieClient.environment)
+		response.EnvironmentSettings = b.Config.OpsGenie.EnvironmentSettings
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+// ToggleOpsGenie enables or disables OpsGenie alerts
+func (b *BreakerAPI) ToggleOpsGenie(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	var request OpsGenieToggleRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Update the configuration
+	b.Config.OpsGenie.Enabled = request.Enabled
+
+	// Save the changes
+	err := SaveConfig(configPath, &b.Config)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to save config: %v", err)})
+		return
+	}
+
+	// Reinitialize the client if enabling
+	if request.Enabled {
+		opsgenieClient := GetOpsGenieClient(b.Config.OpsGenie)
+		err = opsgenieClient.Initialize()
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"error": fmt.Sprintf("OpsGenie enabled but initialization failed: %v", err),
+			})
+			return
+		}
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"enabled": b.Config.OpsGenie.Enabled,
+		"message": fmt.Sprintf("OpsGenie alerts %s", statusText(request.Enabled)),
+	})
+}
+
+// UpdateOpsGeniePriority updates the priority for OpsGenie alerts
+func (b *BreakerAPI) UpdateOpsGeniePriority(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	var request OpsGeniePriorityRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate priority
+	if !isValidPriority(request.Priority) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid priority. Must be P1, P2, P3, P4, or P5"})
+		return
+	}
+
+	// Update the configuration
+	b.Config.OpsGenie.Priority = request.Priority
+
+	// Save the changes
+	err := SaveConfig(configPath, &b.Config)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to save config: %v", err)})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"priority": b.Config.OpsGenie.Priority,
+		"message":  fmt.Sprintf("OpsGenie priority updated to %s", request.Priority),
+	})
+}
+
+// UpdateOpsGenieTriggers updates which events trigger OpsGenie alerts
+func (b *BreakerAPI) UpdateOpsGenieTriggers(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	var request OpsGenieTriggersRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Update only the fields that were provided
+	if request.TriggerOnOpen != nil {
+		b.Config.OpsGenie.TriggerOnOpen = *request.TriggerOnOpen
+	}
+	if request.TriggerOnReset != nil {
+		b.Config.OpsGenie.TriggerOnReset = *request.TriggerOnReset
+	}
+	if request.TriggerOnMemory != nil {
+		b.Config.OpsGenie.TriggerOnMemory = *request.TriggerOnMemory
+	}
+	if request.TriggerOnLatency != nil {
+		b.Config.OpsGenie.TriggerOnLatency = *request.TriggerOnLatency
+	}
+
+	// Save the changes
+	err := SaveConfig(configPath, &b.Config)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to save config: %v", err)})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"trigger_on_breaker_open":      b.Config.OpsGenie.TriggerOnOpen,
+		"trigger_on_breaker_reset":     b.Config.OpsGenie.TriggerOnReset,
+		"trigger_on_memory_threshold":  b.Config.OpsGenie.TriggerOnMemory,
+		"trigger_on_latency_threshold": b.Config.OpsGenie.TriggerOnLatency,
+		"message":                      "OpsGenie trigger settings updated",
+	})
+}
+
+// UpdateOpsGenieTags updates the tags for OpsGenie alerts
+func (b *BreakerAPI) UpdateOpsGenieTags(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	var request OpsGenieTagsRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Update the configuration
+	b.Config.OpsGenie.Tags = request.Tags
+
+	// Save the changes
+	err := SaveConfig(configPath, &b.Config)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to save config: %v", err)})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"tags":    b.Config.OpsGenie.Tags,
+		"message": "OpsGenie tags updated",
+	})
+}
+
+// UpdateOpsGenieCooldown updates the cooldown period between alerts
+func (b *BreakerAPI) UpdateOpsGenieCooldown(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	var request OpsGenieCooldownRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate cooldown
+	if request.CooldownSeconds < 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Cooldown seconds must be a positive value"})
+		return
+	}
+
+	// Update the configuration
+	b.Config.OpsGenie.AlertCooldownSeconds = request.CooldownSeconds
+
+	// Save the changes
+	err := SaveConfig(configPath, &b.Config)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to save config: %v", err)})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"cooldown_seconds": b.Config.OpsGenie.AlertCooldownSeconds,
+		"message":          fmt.Sprintf("OpsGenie cooldown period updated to %d seconds", request.CooldownSeconds),
+	})
+}
+
+// Helper function to determine if a priority is valid
+func isValidPriority(priority string) bool {
+	validPriorities := map[string]bool{
+		"P1": true,
+		"P2": true,
+		"P3": true,
+		"P4": true,
+		"P5": true,
+	}
+	return validPriorities[priority]
+}
+
+// Helper function to convert boolean to enabled/disabled text
+func statusText(enabled bool) string {
+	if enabled {
+		return "enabled"
+	}
+	return "disabled"
+}
+
 // AddEndpointToRouter adds all the breaker endpoints to the provided router
 func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 	// Create a router group for the breaker
@@ -472,6 +759,17 @@ func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 		breakerGroup.GET("/latencies-above-threshold", breakerAPI.LatenciesAboveThreshold)
 		breakerGroup.GET("/memory-limit", breakerAPI.GetMemoryLimit)
 		breakerGroup.POST("/reset", breakerAPI.Reset)
+
+		// New OpsGenie endpoints
+		opsgenieGroup := breakerGroup.Group("/opsgenie")
+		{
+			opsgenieGroup.GET("/status", breakerAPI.GetOpsGenieStatus)
+			opsgenieGroup.POST("/toggle", breakerAPI.ToggleOpsGenie)
+			opsgenieGroup.POST("/priority", breakerAPI.UpdateOpsGeniePriority)
+			opsgenieGroup.POST("/triggers", breakerAPI.UpdateOpsGenieTriggers)
+			opsgenieGroup.POST("/tags", breakerAPI.UpdateOpsGenieTags)
+			opsgenieGroup.POST("/cooldown", breakerAPI.UpdateOpsGenieCooldown)
+		}
 	}
 }
 
