@@ -134,8 +134,11 @@ func (l *Logger) LatencyInfo(currentLatency, threshold int64, aboveThreshold boo
 	}
 
 	fileName, line := getCallerInfo(2)
-	l.Logf("At [%s:%d] - Current latency percentile: %v, Threshold: %v, Above threshold: %v",
-		fileName, line, currentLatency, threshold, aboveThreshold)
+	if aboveThreshold {
+		l.Logf("At [%s:%d] - Current latency percentile: %v, Threshold: %v, Above threshold: %v",
+			fileName, line, currentLatency, threshold, aboveThreshold)
+		return
+	}
 }
 
 // TrendAnalysisInfo logs information about trend analysis

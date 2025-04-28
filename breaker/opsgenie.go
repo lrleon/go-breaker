@@ -494,7 +494,7 @@ func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, wait
 	// Record the alert time for cooldown
 	o.recordAlert(alertType)
 
-	log.Printf("Successfully sent circuit breaker OPEN alert to OpsGenie. RequestID: %s", resp.RequestId)
+	log.Printf("ALERT SENT: Circuit breaker OPEN alert sent to OpsGenie. RequestID: %s, Priority: %s", resp.RequestId, req.Priority)
 	return nil
 }
 
@@ -561,7 +561,7 @@ func (o *OpsGenieClient) SendBreakerResetAlert() error {
 	// Record the alert time for cooldown
 	o.recordAlert(alertType)
 
-	log.Printf("Successfully sent circuit breaker RESET alert to OpsGenie. RequestID: %s", resp.RequestId)
+	log.Printf("ALERT SENT: Circuit breaker RESET alert sent to OpsGenie. RequestID: %s, Priority: %s", resp.RequestId, req.Priority)
 	return nil
 }
 
@@ -635,7 +635,8 @@ func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) er
 	// Record the alert time for cooldown
 	o.recordAlert(alertType)
 
-	log.Printf("Successfully sent memory threshold alert to OpsGenie. RequestID: %s", resp.RequestId)
+	log.Printf("ALERT SENT: Memory threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Usage: %.2f%%",
+		resp.RequestId, req.Priority, memoryStatus.CurrentUsage)
 	return nil
 }
 
@@ -703,6 +704,7 @@ func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64) error {
 	// Record the alert time for cooldown
 	o.recordAlert(alertType)
 
-	log.Printf("Successfully sent latency threshold alert to OpsGenie. RequestID: %s", resp.RequestId)
+	log.Printf("ALERT SENT: Latency threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Latency: %dms",
+		resp.RequestId, req.Priority, latency)
 	return nil
 }

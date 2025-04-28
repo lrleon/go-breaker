@@ -153,6 +153,16 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	// Logging for debugging
 	b.logger.LatencyInfo(latencyPercentile, b.config.LatencyThreshold, latencyAboveThreshold)
 
+	// Add explicit log when latency exceeds threshold
+	if latencyAboveThreshold {
+		b.logger.Logf("ALERT: Latency %dms exceeds threshold of %dms", latencyPercentile, b.config.LatencyThreshold)
+	}
+
+	// Add explicit log when memory has issues
+	if !memoryStatus {
+		b.logger.Logf("ALERT: Memory threshold exceeded")
+	}
+
 	// Determine whether to trigger the breaker
 	shouldTrigger := false
 
@@ -207,6 +217,18 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 		b.triggered = true
 		b.lastTripTime = time.Now()
 		b.logger.BreakerTriggered(latencyPercentile, memoryStatus, b.config.TrendAnalysisEnabled, b.config.WaitTime)
+
+		// Log the breaker triggered event with more details
+		triggerReason := "latency and/or memory issues"
+		if !memoryStatus && latencyAboveThreshold {
+			triggerReason = "both latency and memory issues"
+		} else if !memoryStatus {
+			triggerReason = "memory issues"
+		} else if latencyAboveThreshold {
+			triggerReason = "latency issues"
+		}
+		b.logger.Logf("ACTION: Circuit breaker TRIGGERED due to %s. Waiting %d seconds before reset attempt",
+			triggerReason, b.config.WaitTime)
 
 		// Send OpsGenie alert for breaker triggered
 		if b.opsGenieClient != nil && b.config.OpsGenie != nil && b.config.OpsGenie.Enabled {
