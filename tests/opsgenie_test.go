@@ -128,7 +128,7 @@ func TestSendingAlerts(t *testing.T) {
 	assert.Contains(t, err.Error(), "not initialized")
 
 	// Test latency threshold alert
-	err = nilClient.SendLatencyThresholdAlert(100)
+	err = nilClient.SendLatencyThresholdAlert(100, 50)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not initialized")
 }

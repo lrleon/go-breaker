@@ -2,10 +2,11 @@ package breaker
 
 import (
 	"context"
-
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,10 +71,11 @@ func GetOpsGenieClient(config *OpsGenieConfig) *OpsGenieClient {
 type OpsGenieClient struct {
 	config        *OpsGenieConfig
 	alertClient   *alert.Client
-	lastAlertTime map[string]time.Time // Map to track when each alert type was last sent
+	lastAlertTime map[string]time.Time
+	sentAlertIDs  map[string]bool
 	initialized   bool
-	mutex         sync.RWMutex // Mutex to protect concurrent access to the lastAlertTime map
-	environment   Environment  // Current runtime environment
+	mutex         sync.RWMutex
+	environment   Environment
 }
 
 // NewOpsGenieClient creates a new OpsGenie client with the given configuration
@@ -91,7 +93,7 @@ func NewOpsGenieClient(config *OpsGenieConfig) *OpsGenieClient {
 	return &OpsGenieClient{
 		config:        config,
 		lastAlertTime: make(map[string]time.Time),
-		initialized:   false,
+		sentAlertIDs:  make(map[string]bool),
 		environment:   env,
 	}
 }
@@ -341,10 +343,62 @@ func (o *OpsGenieClient) recordAlert(alertType string) {
 		alertType, now.Format(time.RFC3339), o.config.AlertCooldownSeconds)
 }
 
-// Helper function to guarantee alert uniqueness by API identifier and alert type
-func (o *OpsGenieClient) createUniqueAlertIdentifier(alertType string) string {
+// generateAlertID creates a unique identifier for each alert to prevent duplication
+func (o *OpsGenieClient) generateAlertID(alertType string) string {
+	// Create a consistent ID based on alert type and API identifier that's unique but also
+	// remains the same for identical alerts within a time window to prevent duplicates
 	apiID := o.getAPIIdentifier()
-	return fmt.Sprintf("%s-%s", apiID, alertType)
+	// Round to the nearest minute to prevent alerts with same root cause from creating duplicates
+	timeWindow := time.Now().Truncate(time.Minute).Unix()
+	return fmt.Sprintf("%s-%s-%d", apiID, alertType, timeWindow)
+}
+
+// addSentAlertID marks an alert ID as sent to prevent duplicates
+func (o *OpsGenieClient) addSentAlertID(alertID string) {
+	if o == nil {
+		log.Printf("Cannot add sent alert ID: OpsGenie client is nil")
+		return
+	}
+
+	o.mutex.Lock()
+	defer o.mutex.Unlock()
+
+	o.sentAlertIDs[alertID] = true
+	// Cleanup old alert IDs (older than 1 hour) to prevent memory leak
+	if len(o.sentAlertIDs) > 1000 {
+		cutoff := time.Now().Add(-1 * time.Hour)
+		for id := range o.sentAlertIDs {
+			// Extract timestamp from ID format: "apiID-alertType-timestamp"
+			parts := strings.Split(id, "-")
+			if len(parts) > 2 {
+				timestamp, err := strconv.ParseInt(parts[2], 10, 64)
+				if err != nil {
+					// If we can't parse the timestamp, leave it for now
+					continue
+				}
+				if time.Unix(timestamp, 0).Before(cutoff) {
+					log.Printf("Cleaning up old alert ID references to prevent memory leaks")
+					delete(o.sentAlertIDs, id)
+					if len(o.sentAlertIDs) < 500 {
+						break
+					}
+				}
+			}
+		}
+	}
+}
+
+// isSentAlertID checks if an alert ID has already been sent
+func (o *OpsGenieClient) isSentAlertID(alertID string) bool {
+	if o == nil {
+		log.Printf("Cannot check sent alert ID: OpsGenie client is nil")
+		return false
+	}
+
+	o.mutex.RLock()
+	defer o.mutex.RUnlock()
+
+	return o.sentAlertIDs[alertID]
 }
 
 // buildAPIInfoDetails creates a structured description of the API for alert details
@@ -434,9 +488,24 @@ func memoryStatusString(memoryOK bool) string {
 	return "THRESHOLD EXCEEDED"
 }
 
+// createUniqueAlertIdentifier creates a unique identifier for the alert
+func (o *OpsGenieClient) createUniqueAlertIdentifier(alertType string) string {
+	apiID := o.getAPIIdentifier()
+	return fmt.Sprintf("%s-%s", apiID, alertType)
+}
+
 // SendBreakerOpenAlert sends an alert when the circuit breaker opens
 func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, waitTime int) error {
 	alertType := o.createUniqueAlertIdentifier("circuit_breaker_open")
+
+	// Generate a unique alert ID for this specific alert (unique per minute)
+	alertID := o.generateAlertID(alertType)
+
+	// Check if this exact alert was already sent recently
+	if o.isSentAlertID(alertID) {
+		log.Printf("DUPLICATE PREVENTED: Alert %s with ID %s was already sent recently", alertType, alertID)
+		return nil
+	}
 
 	// Check if OpsGenie is properly initialized
 	if !o.IsInitialized() {
@@ -476,10 +545,11 @@ func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, wait
 		o.buildAPIInfoDetails(),
 	)
 
-	// Create the request
+	// Create the request with the unique alert ID in alias to prevent duplicates
 	req := &alert.CreateAlertRequest{
 		Message:     message,
 		Description: description,
+		Alias:       alertID, // Use the unique ID as alias to prevent duplicates in OpsGenie
 		Responders: []alert.Responder{
 			{
 				Type: "team",
@@ -493,22 +563,35 @@ func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, wait
 	}
 
 	// Send the alert
-	log.Printf("Sending circuit breaker OPEN alert to OpsGenie with priority: %s", req.Priority)
+	log.Printf("Sending circuit breaker OPEN alert to OpsGenie with priority: %s and ID: %s", req.Priority, alertID)
 	resp, err := o.alertClient.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
 	}
 
+	// Record the alert ID as sent to prevent duplicates
+	o.addSentAlertID(alertID)
+
 	// Record the alert time for cooldown
 	o.recordAlert(alertType)
 
-	log.Printf("ALERT SENT: Circuit breaker OPEN alert sent to OpsGenie. RequestID: %s, Priority: %s", resp.RequestId, req.Priority)
+	log.Printf("ALERT SENT: Circuit breaker OPEN alert sent to OpsGenie. RequestID: %s, Priority: %s, AlertID: %s",
+		resp.RequestId, req.Priority, alertID)
 	return nil
 }
 
 // SendBreakerResetAlert sends an alert when the circuit breaker resets
 func (o *OpsGenieClient) SendBreakerResetAlert() error {
 	alertType := o.createUniqueAlertIdentifier("circuit_breaker_reset")
+
+	// Generate a unique alert ID for this specific alert (unique per minute)
+	alertID := o.generateAlertID(alertType)
+
+	// Check if this exact alert was already sent recently
+	if o.isSentAlertID(alertID) {
+		log.Printf("DUPLICATE PREVENTED: Alert %s with ID %s was already sent recently", alertType, alertID)
+		return nil
+	}
 
 	// Check if OpsGenie is properly initialized
 	if !o.IsInitialized() {
@@ -536,17 +619,17 @@ func (o *OpsGenieClient) SendBreakerResetAlert() error {
 
 	message := fmt.Sprintf("Circuit Breaker has RESET for %s", apiIdentifier)
 	description := fmt.Sprintf(
-		"The circuit breaker has been reset and is now CLOSED for %s.\n\n"+
-			"Requests are now being processed normally.\n\n"+
+		"The circuit breaker has RESET and is now allowing traffic again for %s.\n\n"+
 			"%s",
 		apiIdentifier,
 		o.buildAPIInfoDetails(),
 	)
 
-	// Create the request
+	// Create the request with the unique alert ID in alias to prevent duplicates
 	req := &alert.CreateAlertRequest{
 		Message:     message,
 		Description: description,
+		Alias:       alertID, // Use the unique ID as alias to prevent duplicates in OpsGenie
 		Responders: []alert.Responder{
 			{
 				Type: "team",
@@ -560,22 +643,35 @@ func (o *OpsGenieClient) SendBreakerResetAlert() error {
 	}
 
 	// Send the alert
-	log.Printf("Sending circuit breaker RESET alert to OpsGenie with priority: %s", req.Priority)
+	log.Printf("Sending circuit breaker RESET alert to OpsGenie with priority: %s and ID: %s", req.Priority, alertID)
 	resp, err := o.alertClient.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
 	}
 
+	// Record the alert ID as sent to prevent duplicates
+	o.addSentAlertID(alertID)
+
 	// Record the alert time for cooldown
 	o.recordAlert(alertType)
 
-	log.Printf("ALERT SENT: Circuit breaker RESET alert sent to OpsGenie. RequestID: %s, Priority: %s", resp.RequestId, req.Priority)
+	log.Printf("ALERT SENT: Circuit breaker RESET alert sent to OpsGenie. RequestID: %s, Priority: %s, AlertID: %s",
+		resp.RequestId, req.Priority, alertID)
 	return nil
 }
 
 // SendMemoryThresholdAlert sends an alert when memory usage exceeds the threshold
 func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) error {
 	alertType := o.createUniqueAlertIdentifier("memory_threshold")
+
+	// Generate a unique alert ID for this specific alert (unique per minute)
+	alertID := o.generateAlertID(alertType)
+
+	// Check if this exact alert was already sent recently
+	if o.isSentAlertID(alertID) {
+		log.Printf("DUPLICATE PREVENTED: Alert %s with ID %s was already sent recently", alertType, alertID)
+		return nil
+	}
 
 	// Check if OpsGenie is properly initialized
 	if !o.IsInitialized() {
@@ -601,26 +697,27 @@ func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) er
 	// Begin building the alert message
 	apiIdentifier := o.getAPIIdentifier()
 
-	message := fmt.Sprintf("Memory Threshold Exceeded for %s", apiIdentifier)
+	message := fmt.Sprintf("Memory Usage Exceeds Threshold for %s", apiIdentifier)
 	description := fmt.Sprintf(
-		"The memory usage has exceeded the threshold for %s.\n\n"+
-			"- Current Memory Usage: %.2f%%\n"+
+		"Memory usage has exceeded the configured threshold for %s.\n\n"+
+			"- Current Usage: %.2f%%\n"+
 			"- Threshold: %.2f%%\n"+
-			"- Used Memory: %d bytes\n"+
-			"- Total Memory: %d bytes\n\n"+
+			"- Total Memory: %d MB\n"+
+			"- Used Memory: %d MB\n\n"+
 			"%s",
 		apiIdentifier,
 		memoryStatus.CurrentUsage,
 		memoryStatus.Threshold,
-		memoryStatus.UsedMemory,
-		memoryStatus.TotalMemory,
+		memoryStatus.TotalMemory/1024/1024,
+		memoryStatus.UsedMemory/1024/1024,
 		o.buildAPIInfoDetails(),
 	)
 
-	// Create the request
+	// Create the request with the unique alert ID in alias to prevent duplicates
 	req := &alert.CreateAlertRequest{
 		Message:     message,
 		Description: description,
+		Alias:       alertID, // Use the unique ID as alias to prevent duplicates in OpsGenie
 		Responders: []alert.Responder{
 			{
 				Type: "team",
@@ -634,23 +731,35 @@ func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) er
 	}
 
 	// Send the alert
-	log.Printf("Sending memory threshold alert to OpsGenie with priority: %s", req.Priority)
+	log.Printf("Sending memory threshold alert to OpsGenie with priority: %s and ID: %s", req.Priority, alertID)
 	resp, err := o.alertClient.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
 	}
 
+	// Record the alert ID as sent to prevent duplicates
+	o.addSentAlertID(alertID)
+
 	// Record the alert time for cooldown
 	o.recordAlert(alertType)
 
-	log.Printf("ALERT SENT: Memory threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Usage: %.2f%%",
-		resp.RequestId, req.Priority, memoryStatus.CurrentUsage)
+	log.Printf("ALERT SENT: Memory threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Usage: %.2f%%, AlertID: %s",
+		resp.RequestId, req.Priority, memoryStatus.CurrentUsage, alertID)
 	return nil
 }
 
 // SendLatencyThresholdAlert sends an alert when latency exceeds the threshold
-func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64) error {
+func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64, thresholdMs int64) error {
 	alertType := o.createUniqueAlertIdentifier("latency_threshold")
+
+	// Generate a unique alert ID for this specific alert (unique per minute)
+	alertID := o.generateAlertID(alertType)
+
+	// Check if this exact alert was already sent recently
+	if o.isSentAlertID(alertID) {
+		log.Printf("DUPLICATE PREVENTED: Alert %s with ID %s was already sent recently", alertType, alertID)
+		return nil
+	}
 
 	// Check if OpsGenie is properly initialized
 	if !o.IsInitialized() {
@@ -676,20 +785,23 @@ func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64) error {
 	// Begin building the alert message
 	apiIdentifier := o.getAPIIdentifier()
 
-	message := fmt.Sprintf("Latency Threshold Exceeded for %s", apiIdentifier)
+	message := fmt.Sprintf("Latency Exceeds Threshold for %s", apiIdentifier)
 	description := fmt.Sprintf(
-		"The latency has exceeded the threshold for %s.\n\n"+
-			"- Current Latency: %d ms\n\n"+
+		"Latency has exceeded the configured threshold for %s.\n\n"+
+			"- Current Latency: %d ms\n"+
+			"- Threshold: %d ms\n\n"+
 			"%s",
 		apiIdentifier,
 		latency,
+		thresholdMs,
 		o.buildAPIInfoDetails(),
 	)
 
-	// Create the request
+	// Create the request with the unique alert ID in alias to prevent duplicates
 	req := &alert.CreateAlertRequest{
 		Message:     message,
 		Description: description,
+		Alias:       alertID, // Use the unique ID as alias to prevent duplicates in OpsGenie
 		Responders: []alert.Responder{
 			{
 				Type: "team",
@@ -703,16 +815,19 @@ func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64) error {
 	}
 
 	// Send the alert
-	log.Printf("Sending latency threshold alert to OpsGenie with priority: %s", req.Priority)
+	log.Printf("Sending latency threshold alert to OpsGenie with priority: %s and ID: %s", req.Priority, alertID)
 	resp, err := o.alertClient.Create(ctx, req)
 	if err != nil {
 		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
 	}
 
+	// Record the alert ID as sent to prevent duplicates
+	o.addSentAlertID(alertID)
+
 	// Record the alert time for cooldown
 	o.recordAlert(alertType)
 
-	log.Printf("ALERT SENT: Latency threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Latency: %dms",
-		resp.RequestId, req.Priority, latency)
+	log.Printf("ALERT SENT: Latency threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Latency: %dms, AlertID: %s",
+		resp.RequestId, req.Priority, latency, alertID)
 	return nil
 }
