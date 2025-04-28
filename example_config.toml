@@ -1,0 +1,152 @@
+# Go-Breaker Example Configuration
+# This file demonstrates all available configuration options with descriptions
+
+#==============================================================================
+# CORE CIRCUIT BREAKER CONFIGURATION
+#==============================================================================
+
+# Memory threshold as percentage (0-100)
+# When memory usage exceeds this percentage of the total available memory,
+# the circuit breaker will trip
+memory_threshold = 80.0
+
+# Latency threshold in milliseconds
+# Operations taking longer than this will contribute to latency-based circuit breaking
+latency_threshold = 1500
+
+# Number of operations to track in the sliding window
+# Larger windows provide more stable measurements but respond more slowly to changes
+latency_window_size = 64
+
+# Percentile for latency measurement (0-1)
+# e.g., 0.95 means the circuit breaks when 95% of requests exceed the threshold
+percentile = 0.95
+
+# Time to wait after tripping in seconds before allowing the circuit to close again
+wait_time = 10
+
+# Enable trend analysis
+# When enabled, the circuit breaker will only trip if latency is trending upward
+trend_analysis_enabled = false
+
+# Minimum number of samples needed before trend analysis is performed
+trend_analysis_min_sample_count = 10
+
+#==============================================================================
+# OPSGENIE INTEGRATION CONFIGURATION
+#==============================================================================
+
+[opsgenie]
+# Enable OpsGenie integration
+# When false, no alerts will be sent regardless of other settings
+enabled = true
+
+# OpsGenie region to use - can be "us" or "eu"
+# This can be overridden by the OPSGENIE_REGION environment variable
+region = "us"
+
+# Source identifier for the alerts
+# This helps identify which system is generating the alert
+source = "go-breaker"
+
+# Tags to include with alerts for filtering and organization
+tags = ["production", "api", "circuit-breaker"]
+
+# OpsGenie team to route alerts to
+team = "platform-team"
+
+# Priority level for alerts (P1-P5, where P1 is highest)
+priority = "P2"
+
+# Enable alert when the circuit breaker trips (opens)
+trigger_on_breaker_open = true
+
+# Enable alert when the circuit breaker resets (closes)
+trigger_on_breaker_reset = true
+
+# Enable alert when memory threshold is exceeded
+trigger_on_memory_threshold = true
+
+# Enable alert when latency threshold is exceeded
+trigger_on_latency_threshold = true
+
+# Include latency metrics in the alert details
+include_latency_metrics = true
+
+# Include memory usage metrics in the alert details
+include_memory_metrics = true
+
+# Include system information in the alert details
+include_system_info = true
+
+# Cooldown period in seconds between sending similar alerts
+# Prevents alert storms during ongoing issues
+alert_cooldown_seconds = 300
+
+# Whether to use environment-specific settings
+use_environments = true
+
+# Environment-specific OpsGenie settings
+# This allows different alert configurations based on the environment
+[opsgenie.environment_settings]
+  # Development environment
+  [opsgenie.environment_settings.dev]
+  enabled = false
+  priority = "P5"
+  
+  # UAT/Staging environment
+  [opsgenie.environment_settings.uat]
+  enabled = true
+  priority = "P3"
+  
+  # Production environment
+  [opsgenie.environment_settings.production]
+  enabled = true
+  priority = "P2"
+
+#==============================================================================
+# API INFORMATION (INCLUDED IN ALERTS)
+#==============================================================================
+
+# Information about the API being protected by the circuit breaker
+# These details will be included in OpsGenie alerts
+api_name = "Payment API"
+api_version = "v1.2.3"
+api_namespace = "payment"
+api_description = "Handles payment processing and transactions"
+api_owner = "Payments Team"
+api_priority = "critical"
+api_dependencies = ["database", "auth-service", "notification-service"]
+api_endpoints = ["/payments", "/refunds", "/transactions"]
+api_custom_attributes = { service_tier = "premium", business_impact = "high" }
+
+#==============================================================================
+# USAGE TIPS AND RECOMMENDED PRACTICES
+#==============================================================================
+
+# ENVIRONMENT VARIABLE OVERRIDES:
+# The following environment variables can be used to override settings:
+#
+# OPSGENIE_API_KEY      - Set the OpsGenie API key (required for alerts)
+# OPSGENIE_REGION       - Set the OpsGenie region (defaults to "us")
+# OPSGENIE_API_URL      - Set a custom API URL if needed
+# OPSGENIE_REQUIRED     - If "true", will fail on OpsGenie initialization errors
+#
+# GOBREAKER_ENVIRONMENT - Set the current environment (dev, uat, production)
+#                         This will be used to select the appropriate
+#                         environment_settings in the opsgenie configuration.
+#
+# Example:
+# export OPSGENIE_API_KEY="your-api-key-here"
+# export GOBREAKER_ENVIRONMENT="production"
+
+# MULTIPLE ENVIRONMENTS DEPLOYMENT:
+# For different environments, you can:
+# 1. Use a single config file and set GOBREAKER_ENVIRONMENT appropriately
+# 2. Use separate config files for each environment
+# 3. Use environment variables to override key settings
+
+# KUBERNETES DEPLOYMENT:
+# When running in Kubernetes, go-breaker will automatically detect
+# memory limits from the container cgroup settings.
+# No additional configuration is needed for memory limits.
