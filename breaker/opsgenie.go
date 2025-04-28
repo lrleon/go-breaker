@@ -18,7 +18,7 @@ const (
 	EnvOpsGenieAPIKey = "OPSGENIE_API_KEY"
 	EnvOpsGenieRegion = "OPSGENIE_REGION"
 	EnvOpsGenieAPIURL = "OPSGENIE_API_URL"
-	EnvEnvironment    = "APP_ENVIRONMENT" // Environment variable to determine the current environment
+	EnvEnvironment    = "ENVIRONMENT" // Environment variable to determine the current environment
 )
 
 // MemoryStatus represents the current memory status of the application
