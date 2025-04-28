@@ -40,13 +40,29 @@ var (
 // GetOpsGenieClient returns a singleton instance of the OpsGenie client
 // Ensures that only one shared instance of the client exists across the application
 func GetOpsGenieClient(config *OpsGenieConfig) *OpsGenieClient {
-	opsgenieClientOnce.Do(func() {
+	opsgenieClientMutex.Lock()
+	defer opsgenieClientMutex.Unlock()
+
+	// Check if instance exists or if configuration has changed
+	needsNew := opsgenieClientInstance == nil
+
+	// If the instance exists, check if the configuration has changed
+	if !needsNew && opsgenieClientInstance.config != nil {
+		// Only compare the parameters relevant to cooldown
+		if opsgenieClientInstance.config.AlertCooldownSeconds != config.AlertCooldownSeconds {
+			log.Printf("OpsGenie configuration has changed, recreating client")
+			needsNew = true
+		}
+	}
+
+	if needsNew {
 		opsgenieClientInstance = NewOpsGenieClient(config)
 		err := opsgenieClientInstance.Initialize()
 		if err != nil {
 			log.Printf("Error initializing OpsGenie client: %v", err)
 		}
-	})
+	}
+
 	return opsgenieClientInstance
 }
 
