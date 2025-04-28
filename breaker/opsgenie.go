@@ -2,7 +2,6 @@ package breaker
 
 import (
 	"context"
-
 	"fmt"
 	"log"
 	"os"
@@ -70,10 +69,11 @@ func GetOpsGenieClient(config *OpsGenieConfig) *OpsGenieClient {
 type OpsGenieClient struct {
 	config        *OpsGenieConfig
 	alertClient   *alert.Client
-	lastAlertTime map[string]time.Time // Map to track when each alert type was last sent
+	lastAlertTime map[string]time.Time
+	alertSent     map[string]bool
+	mutex         sync.RWMutex
 	initialized   bool
-	mutex         sync.RWMutex // Mutex to protect concurrent access to the lastAlertTime map
-	environment   Environment  // Current runtime environment
+	environment   Environment
 }
 
 // NewOpsGenieClient creates a new OpsGenie client with the given configuration
@@ -91,7 +91,7 @@ func NewOpsGenieClient(config *OpsGenieConfig) *OpsGenieClient {
 	return &OpsGenieClient{
 		config:        config,
 		lastAlertTime: make(map[string]time.Time),
-		initialized:   false,
+		alertSent:     make(map[string]bool),
 		environment:   env,
 	}
 }
@@ -296,36 +296,48 @@ func (o *OpsGenieClient) IsInitialized() bool {
 	return o.initialized
 }
 
-// isOnCooldown checks if an alert type is still in its cooldown period
-func (o *OpsGenieClient) isOnCooldown(alertType string) bool {
-	if o == nil || o.config == nil {
-		log.Printf("OpsGenie client or config is nil when checking cooldown for %s", alertType)
-		return true
+// IsOnCooldown checks if an alert type is still in its cooldown period
+func (o *OpsGenieClient) IsOnCooldown(alertType string) bool {
+	if o == nil {
+		log.Printf("Cannot check cooldown for %s: OpsGenie client is nil", alertType)
+		return false
 	}
 
-	// Acquire lock for safe reading of the map
+	// No cooldown check if cooldown is disabled (0 seconds)
+	if o.config.AlertCooldownSeconds <= 0 {
+		log.Printf("COOLDOWN CHECK: No cooldown for %s (cooldown disabled)", alertType)
+		return false
+	}
+
+	// Acquire lock for safe reading from the map
 	o.mutex.RLock()
 	defer o.mutex.RUnlock()
 
-	lastSent, exists := o.lastAlertTime[alertType]
+	// Check if alert has been sent at all
+	lastAlertTime, exists := o.lastAlertTime[alertType]
 	if !exists {
-		log.Printf("Alert type %s has never been sent before", alertType)
-		return false // Never sent before
+		log.Printf("COOLDOWN CHECK: No cooldown for %s (first occurrence)", alertType)
+		return false
 	}
 
+	// Calculate if cooldown period has passed
 	cooldownDuration := time.Duration(o.config.AlertCooldownSeconds) * time.Second
-	timeSinceLastAlert := time.Since(lastSent)
-	isOnCooldown := timeSinceLastAlert < cooldownDuration
+	now := time.Now()
+	cooldownEnds := lastAlertTime.Add(cooldownDuration)
+	stillInCooldown := now.Before(cooldownEnds)
 
-	// Add more detailed logging about cooldown status
-	log.Printf("COOLDOWN CHECK: Alert %s - Last sent: %v, Cooldown duration: %v, Time since last: %v, On cooldown: %v",
-		alertType, lastSent.Format(time.RFC3339), cooldownDuration, timeSinceLastAlert, isOnCooldown)
+	if stillInCooldown {
+		timeRemaining := cooldownEnds.Sub(now).Seconds()
+		log.Printf("COOLDOWN CHECK: Alert %s is still in cooldown for %.1f more seconds", alertType, timeRemaining)
+	} else {
+		log.Printf("COOLDOWN CHECK: Cooldown period for %s has expired", alertType)
+	}
 
-	return isOnCooldown
+	return stillInCooldown
 }
 
-// recordAlert records when an alert was sent to enforce cooldown periods
-func (o *OpsGenieClient) recordAlert(alertType string) {
+// RecordAlert records when an alert was sent to enforce cooldown periods
+func (o *OpsGenieClient) RecordAlert(alertType string) {
 	if o == nil {
 		log.Printf("Cannot record alert time for %s: OpsGenie client is nil", alertType)
 		return
@@ -337,14 +349,333 @@ func (o *OpsGenieClient) recordAlert(alertType string) {
 
 	now := time.Now()
 	o.lastAlertTime[alertType] = now
+	o.alertSent[alertType] = true
 	log.Printf("COOLDOWN START: Recorded alert %s at %v with %d second cooldown",
 		alertType, now.Format(time.RFC3339), o.config.AlertCooldownSeconds)
 }
 
-// Helper function to guarantee alert uniqueness by API identifier and alert type
-func (o *OpsGenieClient) createUniqueAlertIdentifier(alertType string) string {
-	apiID := o.getAPIIdentifier()
-	return fmt.Sprintf("%s-%s", apiID, alertType)
+// hasAlertBeenSent checks if this alert type has been sent before
+func (o *OpsGenieClient) hasAlertBeenSent(alertType string) bool {
+	if o == nil {
+		return false
+	}
+
+	o.mutex.RLock()
+	defer o.mutex.RUnlock()
+
+	sent, exists := o.alertSent[alertType]
+	return exists && sent
+}
+
+// determineAlertKey creates a unique key for different alerts
+func (o *OpsGenieClient) determineAlertKey(alertType string, details string) string {
+	return fmt.Sprintf("%s-%s-%s", o.getAPIIdentifier(), alertType, details)
+}
+
+// SendBreakerOpenAlert sends an alert when the circuit breaker opens
+func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, waitTime int) error {
+	if o == nil || !o.config.Enabled || !o.config.TriggerOnOpen {
+		return nil
+	}
+
+	// Not initialized, log and skip
+	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
+		return nil
+	}
+
+	// Determine the alert type
+	alertType := "circuit-open"
+	details := fmt.Sprintf("latency-%dms-%s-wait%ds", latency, memoryStatusString(memoryOK), waitTime)
+	alertKey := o.determineAlertKey(alertType, details)
+
+	// Check if we're in a cooldown period for this alert type
+	if o.IsOnCooldown(alertKey) {
+		log.Printf("Skipping alert for %s due to cooldown period", alertKey)
+		return nil
+	}
+
+	// Determine the appropriate priority based on the environment
+	priority := o.getPriorityForEnvironment()
+
+	// Format the message for this alert
+	message := fmt.Sprintf("%s: Circuit breaker OPEN. [%dms latency] [Memory OK: %t] [Will wait %ds]",
+		o.getAPIIdentifier(), latency, memoryOK, waitTime)
+
+	// Create the request with common fields
+	req := &alert.CreateAlertRequest{
+		Message:     message,
+		Description: o.buildAPIInfoDetails(),
+		Alias:       o.createUniqueAlertIdentifier(alertType),
+		Source:      o.config.Source,
+		Priority:    priority,
+		Tags:        []string{"circuit-breaker", "open"},
+		Details: map[string]string{
+			"API":            o.config.APIName,
+			"API Version":    o.config.APIVersion,
+			"Latency":        fmt.Sprintf("%d", latency),
+			"Memory OK":      fmt.Sprintf("%t", memoryOK),
+			"Wait Time":      fmt.Sprintf("%d", waitTime),
+			"Is First Alert": fmt.Sprintf("%t", !o.hasAlertBeenSent(alertKey)),
+			"Alert Type":     alertType,
+			"Alert Details":  details,
+			"Environment":    string(o.environment),
+		},
+	}
+
+	// Add team if specified
+	if o.config.Team != "" {
+		req.Responders = []alert.Responder{
+			{
+				Type: "team",
+				Name: o.config.Team,
+			},
+		}
+	}
+
+	// Send the alert
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := o.alertClient.Create(ctx, req)
+	if err != nil {
+		log.Printf("Error sending OpsGenie alert: %v", err)
+		return err
+	}
+
+	// Record the alert time for cooldown
+	o.RecordAlert(alertKey)
+
+	log.Printf("ALERT SENT: Circuit breaker OPEN alert sent to OpsGenie. RequestID: %s, Priority: %s, Key: %s",
+		resp.RequestId, req.Priority, alertKey)
+	return nil
+}
+
+// SendBreakerResetAlert sends an alert when the circuit breaker resets
+func (o *OpsGenieClient) SendBreakerResetAlert() error {
+	if o == nil || !o.config.Enabled || !o.config.TriggerOnReset {
+		return nil
+	}
+
+	// Not initialized, log and skip
+	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
+		return nil
+	}
+
+	// Determine the alert type
+	alertType := "circuit-reset"
+	alertKey := o.determineAlertKey(alertType, "reset")
+
+	// Check if we're in a cooldown period for this alert type
+	if o.IsOnCooldown(alertKey) {
+		log.Printf("Skipping alert for %s due to cooldown period", alertKey)
+		return nil
+	}
+
+	// Determine the appropriate priority based on the environment
+	priority := o.getPriorityForEnvironment()
+
+	// Format the message for this alert
+	message := fmt.Sprintf("%s: Circuit breaker RESET. Service is healthy again.", o.getAPIIdentifier())
+
+	// Create the request with common fields
+	req := &alert.CreateAlertRequest{
+		Message:     message,
+		Description: o.buildAPIInfoDetails(),
+		Alias:       o.createUniqueAlertIdentifier(alertType),
+		Source:      o.config.Source,
+		Priority:    priority,
+		Tags:        []string{"circuit-breaker", "reset"},
+		Details: map[string]string{
+			"API":            o.config.APIName,
+			"API Version":    o.config.APIVersion,
+			"Is First Alert": fmt.Sprintf("%t", !o.hasAlertBeenSent(alertKey)),
+			"Alert Type":     alertType,
+			"Environment":    string(o.environment),
+		},
+	}
+
+	// Add team if specified
+	if o.config.Team != "" {
+		req.Responders = []alert.Responder{
+			{
+				Type: "team",
+				Name: o.config.Team,
+			},
+		}
+	}
+
+	// Send the alert
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := o.alertClient.Create(ctx, req)
+	if err != nil {
+		log.Printf("Error sending OpsGenie alert: %v", err)
+		return err
+	}
+
+	// Record the alert time for cooldown
+	o.RecordAlert(alertKey)
+
+	log.Printf("ALERT SENT: Circuit breaker RESET alert sent to OpsGenie. RequestID: %s, Priority: %s, Key: %s",
+		resp.RequestId, req.Priority, alertKey)
+	return nil
+}
+
+// SendMemoryThresholdAlert sends an alert when memory usage exceeds the threshold
+func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) error {
+	if o == nil || !o.config.Enabled || !o.config.TriggerOnMemory {
+		return nil
+	}
+
+	// Not initialized, log and skip
+	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
+		return nil
+	}
+
+	// Determine the alert type
+	alertType := "memory-threshold"
+	details := fmt.Sprintf("%.1f-percent", memoryStatus.CurrentUsage)
+	alertKey := o.determineAlertKey(alertType, details)
+
+	// Check if we're in a cooldown period for this alert type
+	if o.IsOnCooldown(alertKey) {
+		log.Printf("Skipping alert for %s due to cooldown period", alertKey)
+		return nil
+	}
+
+	// Determine the appropriate priority based on the environment
+	priority := o.getPriorityForEnvironment()
+
+	// Format the message for this alert
+	message := fmt.Sprintf("%s: Memory usage at %.2f%% (threshold: %.2f%%)",
+		o.getAPIIdentifier(), memoryStatus.CurrentUsage, memoryStatus.Threshold)
+
+	// Create the request with common fields
+	req := &alert.CreateAlertRequest{
+		Message:     message,
+		Description: o.buildAPIInfoDetails(),
+		Alias:       o.createUniqueAlertIdentifier(alertType),
+		Source:      o.config.Source,
+		Priority:    priority,
+		Tags:        []string{"memory", "threshold"},
+		Details: map[string]string{
+			"API":             o.config.APIName,
+			"API Version":     o.config.APIVersion,
+			"Current Usage":   fmt.Sprintf("%.2f%%", memoryStatus.CurrentUsage),
+			"Threshold":       fmt.Sprintf("%.2f%%", memoryStatus.Threshold),
+			"Total Memory MB": fmt.Sprintf("%.2f", float64(memoryStatus.TotalMemory)/(1024*1024)),
+			"Used Memory MB":  fmt.Sprintf("%.2f", float64(memoryStatus.UsedMemory)/(1024*1024)),
+			"Is First Alert":  fmt.Sprintf("%t", !o.hasAlertBeenSent(alertKey)),
+			"Alert Type":      alertType,
+			"Alert Details":   details,
+			"Environment":     string(o.environment),
+		},
+	}
+
+	// Add team if specified
+	if o.config.Team != "" {
+		req.Responders = []alert.Responder{
+			{
+				Type: "team",
+				Name: o.config.Team,
+			},
+		}
+	}
+
+	// Send the alert
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := o.alertClient.Create(ctx, req)
+	if err != nil {
+		log.Printf("Error sending OpsGenie alert: %v", err)
+		return err
+	}
+
+	// Record the alert time for cooldown
+	o.RecordAlert(alertKey)
+
+	log.Printf("ALERT SENT: Memory threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Usage: %.2f%%, Key: %s",
+		resp.RequestId, req.Priority, memoryStatus.CurrentUsage, alertKey)
+	return nil
+}
+
+// SendLatencyThresholdAlert sends an alert when latency exceeds the threshold
+func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64, thresholdMs int64) error {
+	if o == nil || !o.config.Enabled || !o.config.TriggerOnLatency {
+		return nil
+	}
+
+	// Not initialized, log and skip
+	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
+		return nil
+	}
+
+	// Determine the alert type
+	alertType := "latency-threshold"
+	details := fmt.Sprintf("%dms", latency)
+	alertKey := o.determineAlertKey(alertType, details)
+
+	// Check if we're in a cooldown period for this alert type
+	if o.IsOnCooldown(alertKey) {
+		log.Printf("Skipping alert for %s due to cooldown period", alertKey)
+		return nil
+	}
+
+	// Determine the appropriate priority based on the environment
+	priority := o.getPriorityForEnvironment()
+
+	// Format the message for this alert
+	message := fmt.Sprintf("%s: High latency detected. Current: %dms (threshold: %dms)",
+		o.getAPIIdentifier(), latency, thresholdMs)
+
+	// Create the request with common fields
+	req := &alert.CreateAlertRequest{
+		Message:     message,
+		Description: o.buildAPIInfoDetails(),
+		Alias:       o.createUniqueAlertIdentifier(alertType),
+		Source:      o.config.Source,
+		Priority:    priority,
+		Tags:        []string{"latency", "threshold"},
+		Details: map[string]string{
+			"API":            o.config.APIName,
+			"API Version":    o.config.APIVersion,
+			"Latency":        fmt.Sprintf("%dms", latency),
+			"Threshold":      fmt.Sprintf("%dms", thresholdMs),
+			"Is First Alert": fmt.Sprintf("%t", !o.hasAlertBeenSent(alertKey)),
+			"Alert Type":     alertType,
+			"Alert Details":  details,
+			"Environment":    string(o.environment),
+		},
+	}
+
+	// Add team if specified
+	if o.config.Team != "" {
+		req.Responders = []alert.Responder{
+			{
+				Type: "team",
+				Name: o.config.Team,
+			},
+		}
+	}
+
+	// Send the alert
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := o.alertClient.Create(ctx, req)
+	if err != nil {
+		log.Printf("Error sending OpsGenie alert: %v", err)
+		return err
+	}
+
+	// Record the alert time for cooldown
+	o.RecordAlert(alertKey)
+
+	log.Printf("ALERT SENT: Latency threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Latency: %dms, Key: %s",
+		resp.RequestId, req.Priority, latency, alertKey)
+	return nil
 }
 
 // buildAPIInfoDetails creates a structured description of the API for alert details
@@ -434,285 +765,8 @@ func memoryStatusString(memoryOK bool) string {
 	return "THRESHOLD EXCEEDED"
 }
 
-// SendBreakerOpenAlert sends an alert when the circuit breaker opens
-func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, waitTime int) error {
-	alertType := o.createUniqueAlertIdentifier("circuit_breaker_open")
-
-	// Check if OpsGenie is properly initialized
-	if !o.IsInitialized() {
-		return fmt.Errorf("OpsGenie client not initialized")
-	}
-
-	// Check if this type of alert is enabled in the config
-	if !o.config.TriggerOnOpen {
-		log.Printf("Breaker open alerts are disabled in config")
-		return nil
-	}
-
-	// Check if we're in a cooldown period for this alert type
-	if o.isOnCooldown(alertType) {
-		log.Printf("Skipping alert for %s due to cooldown period", alertType)
-		return nil
-	}
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Begin building the alert message
-	apiIdentifier := o.getAPIIdentifier()
-
-	message := fmt.Sprintf("Circuit Breaker has OPENED for %s", apiIdentifier)
-	description := fmt.Sprintf(
-		"The circuit breaker has been triggered and is now OPEN for %s.\n\n"+
-			"- Latency: %d ms\n"+
-			"- Memory Status: %s\n"+
-			"- Waiting Time: %d seconds before attempting reset\n\n"+
-			"%s",
-		apiIdentifier,
-		latency,
-		memoryStatusString(memoryOK),
-		waitTime,
-		o.buildAPIInfoDetails(),
-	)
-
-	// Create the request
-	req := &alert.CreateAlertRequest{
-		Message:     message,
-		Description: description,
-		Responders: []alert.Responder{
-			{
-				Type: "team",
-				Name: o.config.Team,
-			},
-		},
-		Tags:     o.config.Tags,
-		Entity:   apiIdentifier,
-		Source:   o.config.Source,
-		Priority: o.getPriorityForEnvironment(), // Use environment-specific priority
-	}
-
-	// Send the alert
-	log.Printf("Sending circuit breaker OPEN alert to OpsGenie with priority: %s", req.Priority)
-	resp, err := o.alertClient.Create(ctx, req)
-	if err != nil {
-		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
-	}
-
-	// Record the alert time for cooldown
-	o.recordAlert(alertType)
-
-	log.Printf("ALERT SENT: Circuit breaker OPEN alert sent to OpsGenie. RequestID: %s, Priority: %s", resp.RequestId, req.Priority)
-	return nil
-}
-
-// SendBreakerResetAlert sends an alert when the circuit breaker resets
-func (o *OpsGenieClient) SendBreakerResetAlert() error {
-	alertType := o.createUniqueAlertIdentifier("circuit_breaker_reset")
-
-	// Check if OpsGenie is properly initialized
-	if !o.IsInitialized() {
-		return fmt.Errorf("OpsGenie client not initialized")
-	}
-
-	// Check if this type of alert is enabled in the config
-	if !o.config.TriggerOnReset {
-		log.Printf("Breaker reset alerts are disabled in config")
-		return nil
-	}
-
-	// Check if we're in a cooldown period for this alert type
-	if o.isOnCooldown(alertType) {
-		log.Printf("Skipping alert for %s due to cooldown period", alertType)
-		return nil
-	}
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Begin building the alert message
-	apiIdentifier := o.getAPIIdentifier()
-
-	message := fmt.Sprintf("Circuit Breaker has RESET for %s", apiIdentifier)
-	description := fmt.Sprintf(
-		"The circuit breaker has been reset and is now CLOSED for %s.\n\n"+
-			"Requests are now being processed normally.\n\n"+
-			"%s",
-		apiIdentifier,
-		o.buildAPIInfoDetails(),
-	)
-
-	// Create the request
-	req := &alert.CreateAlertRequest{
-		Message:     message,
-		Description: description,
-		Responders: []alert.Responder{
-			{
-				Type: "team",
-				Name: o.config.Team,
-			},
-		},
-		Tags:     o.config.Tags,
-		Entity:   apiIdentifier,
-		Source:   o.config.Source,
-		Priority: o.getPriorityForEnvironment(), // Use environment-specific priority
-	}
-
-	// Send the alert
-	log.Printf("Sending circuit breaker RESET alert to OpsGenie with priority: %s", req.Priority)
-	resp, err := o.alertClient.Create(ctx, req)
-	if err != nil {
-		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
-	}
-
-	// Record the alert time for cooldown
-	o.recordAlert(alertType)
-
-	log.Printf("ALERT SENT: Circuit breaker RESET alert sent to OpsGenie. RequestID: %s, Priority: %s", resp.RequestId, req.Priority)
-	return nil
-}
-
-// SendMemoryThresholdAlert sends an alert when memory usage exceeds the threshold
-func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) error {
-	alertType := o.createUniqueAlertIdentifier("memory_threshold")
-
-	// Check if OpsGenie is properly initialized
-	if !o.IsInitialized() {
-		return fmt.Errorf("OpsGenie client not initialized")
-	}
-
-	// Check if this type of alert is enabled in the config
-	if !o.config.TriggerOnMemory {
-		log.Printf("Memory threshold alerts are disabled in config")
-		return nil
-	}
-
-	// Check if we're in a cooldown period for this alert type
-	if o.isOnCooldown(alertType) {
-		log.Printf("Skipping alert for %s due to cooldown period", alertType)
-		return nil
-	}
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Begin building the alert message
-	apiIdentifier := o.getAPIIdentifier()
-
-	message := fmt.Sprintf("Memory Threshold Exceeded for %s", apiIdentifier)
-	description := fmt.Sprintf(
-		"The memory usage has exceeded the threshold for %s.\n\n"+
-			"- Current Memory Usage: %.2f%%\n"+
-			"- Threshold: %.2f%%\n"+
-			"- Used Memory: %d bytes\n"+
-			"- Total Memory: %d bytes\n\n"+
-			"%s",
-		apiIdentifier,
-		memoryStatus.CurrentUsage,
-		memoryStatus.Threshold,
-		memoryStatus.UsedMemory,
-		memoryStatus.TotalMemory,
-		o.buildAPIInfoDetails(),
-	)
-
-	// Create the request
-	req := &alert.CreateAlertRequest{
-		Message:     message,
-		Description: description,
-		Responders: []alert.Responder{
-			{
-				Type: "team",
-				Name: o.config.Team,
-			},
-		},
-		Tags:     o.config.Tags,
-		Entity:   apiIdentifier,
-		Source:   o.config.Source,
-		Priority: o.getPriorityForEnvironment(), // Use environment-specific priority
-	}
-
-	// Send the alert
-	log.Printf("Sending memory threshold alert to OpsGenie with priority: %s", req.Priority)
-	resp, err := o.alertClient.Create(ctx, req)
-	if err != nil {
-		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
-	}
-
-	// Record the alert time for cooldown
-	o.recordAlert(alertType)
-
-	log.Printf("ALERT SENT: Memory threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Usage: %.2f%%",
-		resp.RequestId, req.Priority, memoryStatus.CurrentUsage)
-	return nil
-}
-
-// SendLatencyThresholdAlert sends an alert when latency exceeds the threshold
-func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64) error {
-	alertType := o.createUniqueAlertIdentifier("latency_threshold")
-
-	// Check if OpsGenie is properly initialized
-	if !o.IsInitialized() {
-		return fmt.Errorf("OpsGenie client not initialized")
-	}
-
-	// Check if this type of alert is enabled in the config
-	if !o.config.TriggerOnLatency {
-		log.Printf("Latency threshold alerts are disabled in config")
-		return nil
-	}
-
-	// Check if we're in a cooldown period for this alert type
-	if o.isOnCooldown(alertType) {
-		log.Printf("Skipping alert for %s due to cooldown period", alertType)
-		return nil
-	}
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Begin building the alert message
-	apiIdentifier := o.getAPIIdentifier()
-
-	message := fmt.Sprintf("Latency Threshold Exceeded for %s", apiIdentifier)
-	description := fmt.Sprintf(
-		"The latency has exceeded the threshold for %s.\n\n"+
-			"- Current Latency: %d ms\n\n"+
-			"%s",
-		apiIdentifier,
-		latency,
-		o.buildAPIInfoDetails(),
-	)
-
-	// Create the request
-	req := &alert.CreateAlertRequest{
-		Message:     message,
-		Description: description,
-		Responders: []alert.Responder{
-			{
-				Type: "team",
-				Name: o.config.Team,
-			},
-		},
-		Tags:     o.config.Tags,
-		Entity:   apiIdentifier,
-		Source:   o.config.Source,
-		Priority: o.getPriorityForEnvironment(), // Use environment-specific priority
-	}
-
-	// Send the alert
-	log.Printf("Sending latency threshold alert to OpsGenie with priority: %s", req.Priority)
-	resp, err := o.alertClient.Create(ctx, req)
-	if err != nil {
-		return fmt.Errorf("failed to send OpsGenie alert: %v", err)
-	}
-
-	// Record the alert time for cooldown
-	o.recordAlert(alertType)
-
-	log.Printf("ALERT SENT: Latency threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Latency: %dms",
-		resp.RequestId, req.Priority, latency)
-	return nil
+// createUniqueAlertIdentifier creates a unique identifier for the alert
+func (o *OpsGenieClient) createUniqueAlertIdentifier(alertType string) string {
+	apiID := o.getAPIIdentifier()
+	return fmt.Sprintf("%s-%s", apiID, alertType)
 }
