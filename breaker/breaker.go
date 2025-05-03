@@ -63,11 +63,45 @@ func NewBreaker(config *Config) Breaker {
 		opsGenieClient = GetOpsGenieClient(config.OpsGenie)
 	}
 
+	logger := NewLogger("BreakerDriver")
+
+	// Check memory status at initialization
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	// Default values in case of not having a valid memory limit
+	currentMemMB := int64(memStats.Alloc) / 1024 / 1024
+	var memThresholdMB int64 = 0
+	var memoryOK bool = true
+
+	if MemoryLimit <= 0 {
+		logger.Logf("Breaker initialized - Warning: Cannot determine memory limit. Memory checks will be skipped.")
+	} else {
+		// To avoid loss of precision, we make the division before multiplication
+		thresholdFraction := config.MemoryThreshold / 100.0
+		memThresholdBytes := float64(MemoryLimit) * thresholdFraction
+		memThresholdMB = int64(memThresholdBytes / 1024 / 1024)
+
+		memoryOK = float64(memStats.Alloc) < memThresholdBytes
+
+		logger.Logf("Breaker initialized - Memory status: Current: %dMB, Threshold: %dMB (%.2f%% of %dMB), Memory OK: %v",
+			currentMemMB,
+			memThresholdMB,
+			config.MemoryThreshold,
+			MemoryLimit/1024/1024,
+			memoryOK)
+
+		// Additional letter if the memory is close to the limit
+		if float64(memStats.Alloc) > (memThresholdBytes*0.9) && float64(memStats.Alloc) < memThresholdBytes {
+			logger.Logf("WARNING: Memory usage is approaching threshold (>90%% of limit)")
+		}
+	}
+
 	return &BreakerDriver{
 		config:         *config,
 		latencyWindow:  lw,
 		enabled:        true,
-		logger:         NewLogger("BreakerDriver"),
+		logger:         logger,
 		opsGenieClient: opsGenieClient,
 	}
 }

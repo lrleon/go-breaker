@@ -70,14 +70,31 @@ func (b *BreakerDriver) MemoryOK() bool {
 		return memoryOverrideValue
 	}
 
+	// If we do not have a valid memory limit, we cannot verify
+	if MemoryLimit <= 0 {
+		memoryLogger.Logf("Warning: Invalid memory limit (%d). Cannot perform memory threshold check.", MemoryLimit)
+		return true // We assume that memory is fine if we don't have a valid limit
+	}
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
 	currMem := float64(m.Alloc)
-	// Convert percentage to fraction by dividing by 100
-	memLimit := float64(MemoryLimit) * (b.config.MemoryThreshold / 100.0)
 
-	return currMem < memLimit
+	// To avoid loss of precision, we make the division before multiplication
+	// we convert the percentage to fraction by dividing by 100
+	thresholdFraction := b.config.MemoryThreshold / 100.0
+	memLimit := float64(MemoryLimit) * thresholdFraction
+
+	memoryOK := currMem < memLimit
+
+	// Detailed logging for debug if the memory is close to the limit
+	if currMem > (memLimit * 0.9) {
+		memoryLogger.Logf("Memory usage is high: %.2f MB of %.2f MB (%.2f%% of limit)",
+			currMem/1024/1024, memLimit/1024/1024, 100*currMem/float64(MemoryLimit))
+	}
+
+	return memoryOK
 }
 
 // SetMemoryLimitFile Set the memory limit file for testing
