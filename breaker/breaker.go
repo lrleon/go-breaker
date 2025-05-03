@@ -1,6 +1,7 @@
 package breaker
 
 import (
+	"runti
 	"sync"
 	"time"
 )
@@ -114,10 +115,18 @@ func (b *BreakerDriver) Allow() bool {
 	}
 
 	if b.triggered {
-		if time.Since(b.lastTripTime) > time.Duration(b.config.WaitTime)*time.Second &&
-			b.MemoryOK() {
+		timeWaiting := time.Since(b.lastTripTime)
+		waitDuration := time.Duration(b.config.WaitTime) * time.Second
+		memoryStatus := b.MemoryOK()
+
+		b.logger.Logf("Breaker Allow check: triggered=%v, time since trip=%v, wait time=%v, memory ok=%v",
+			b.triggered, timeWaiting, waitDuration, memoryStatus)
+
+		if timeWaiting > waitDuration && memoryStatus {
 			b.triggered = false
 			b.logger.BreakerReset()
+			b.logger.Logf("INFO: Breaker automatically reset after waiting %v (required %v) and memory status OK",
+				timeWaiting, waitDuration)
 
 			// Send OpsGenie alert for breaker reset
 			if b.opsGenieClient != nil && b.config.OpsGenie != nil && b.config.OpsGenie.Enabled {
@@ -128,11 +137,21 @@ func (b *BreakerDriver) Allow() bool {
 				}()
 			}
 		} else {
+			if !memoryStatus {
+				b.logger.Logf("DENY: Request denied because memory is still above threshold")
+			} else {
+				b.logger.Logf("DENY: Request denied because wait time (%v) has not elapsed yet (%v passed)",
+					waitDuration, timeWaiting)
+			}
 			return false
 		}
 	}
 
-	return b.MemoryOK()
+	memoryOk := b.MemoryOK()
+	if !memoryOk {
+		b.logger.Logf("DENY: Request denied due to memory threshold exceeded")
+	}
+	return memoryOk
 }
 
 func (b *BreakerDriver) Done(startTime, endTime time.Time) {
@@ -152,6 +171,8 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 
 	// Logging for debugging
 	b.logger.LatencyInfo(latencyPercentile, b.config.LatencyThreshold, latencyAboveThreshold)
+	b.logger.Logf("Status check: memory_ok=%v, latency_percentile=%dms, threshold=%dms, above_threshold=%v",
+		memoryStatus, latencyPercentile, b.config.LatencyThreshold, latencyAboveThreshold)
 
 	// Add explicit log when latency exceeds threshold
 	if latencyAboveThreshold {
@@ -160,7 +181,11 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 
 	// Add explicit log when memory has issues
 	if !memoryStatus {
-		b.logger.Logf("ALERT: Memory threshold exceeded")
+		memStats := new(runtime.MemStats)
+		runtime.ReadMemStats(memStats)
+		memLimit := float64(MemoryLimit) * (b.config.MemoryThreshold / 100.0)
+		b.logger.Logf("ALERT: Memory threshold exceeded - Current: %dMB, Limit: %.2fMB (%.2f%% of %dMB)",
+			memStats.Alloc/1024/1024, memLimit/1024/1024, b.config.MemoryThreshold, MemoryLimit/1024/1024)
 	}
 
 	// Determine whether to trigger the breaker
@@ -169,6 +194,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	// If there's a memory issue, always trigger
 	if !memoryStatus {
 		shouldTrigger = true
+		b.logger.Logf("TRIGGER REASON: Memory threshold exceeded")
 	}
 
 	// For latency issues, check if we need to consider trend analysis
@@ -180,7 +206,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 			b.logger.TrendAnalysisInfo(hasTrend)
 
 			if hasTrend {
-				b.logger.Logf("Breaker triggered: Latency above threshold AND positive trend detected")
+				b.logger.Logf("TRIGGER REASON: Latency above threshold AND positive trend detected")
 				shouldTrigger = true
 			} else {
 				// Check for a plateau - latencies consistently above threshold
@@ -198,7 +224,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 					}
 
 					if allAboveThreshold {
-						b.logger.Logf("Breaker triggered: Latency plateau detected above threshold")
+						b.logger.Logf("TRIGGER REASON: Latency plateau detected above threshold")
 						shouldTrigger = true
 					} else {
 						b.logger.Logf("Latency above threshold but NO positive trend or plateau. Not triggering breaker.")
@@ -210,6 +236,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 		} else {
 			// No trend analysis, trigger based on a threshold only
 			shouldTrigger = true
+			b.logger.Logf("TRIGGER REASON: Latency above threshold (trend analysis disabled)")
 		}
 	}
 
