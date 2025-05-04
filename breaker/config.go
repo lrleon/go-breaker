@@ -91,15 +91,85 @@ func SetOpsGenieConfigPath(path string) {
 var config *Config
 
 func LoadConfig(path string) (*Config, error) {
+	// Default config with reasonable values
+	defaultConfig := Config{
+		MemoryThreshold:             85.0,
+		LatencyThreshold:            3000,
+		LatencyWindowSize:           256,
+		Percentile:                  0.95,
+		WaitTime:                    4,
+		TrendAnalysisEnabled:        true,
+		TrendAnalysisMinSampleCount: 10,
+	}
+
+	// First try to parse with the root-level structure
 	var config Config
 	_, err := toml.DecodeFile(path, &config)
+
+	// If we failed to load or all values are zero, try the [circuit_breaker] format
+	if err != nil || (config.MemoryThreshold == 0 && config.LatencyThreshold == 0 &&
+		config.LatencyWindowSize == 0 && config.Percentile == 0) {
+
+		// Try to parse with the section-based structure
+		type ConfigWithSections struct {
+			CircuitBreaker Config          `toml:"circuit_breaker"`
+			OpsGenie       *OpsGenieConfig `toml:"opsgenie"`
+		}
+
+		var sectionConfig ConfigWithSections
+		_, sectionErr := toml.DecodeFile(path, &sectionConfig)
+
+		if sectionErr == nil {
+			// Use values from the circuit_breaker section
+			config = sectionConfig.CircuitBreaker
+
+			// Preserve OpsGenie config if it was loaded in the section format
+			if sectionConfig.OpsGenie != nil {
+				config.OpsGenie = sectionConfig.OpsGenie
+			}
+			log.Printf("Loaded configuration using [circuit_breaker] section format")
+		} else if err != nil {
+			log.Printf("Warning: Error loading config from %s: %v. Using default values.", path, err)
+			return &defaultConfig, err
+		}
+	}
+
+	// Validate and set defaults for any zero values
+	if config.MemoryThreshold <= 0 {
+		log.Printf("Warning: Invalid memory_threshold (%f). Using default value of %f.",
+			config.MemoryThreshold, defaultConfig.MemoryThreshold)
+		config.MemoryThreshold = defaultConfig.MemoryThreshold
+	}
+
+	if config.LatencyThreshold <= 0 {
+		config.LatencyThreshold = defaultConfig.LatencyThreshold
+	}
+
+	if config.LatencyWindowSize <= 0 {
+		config.LatencyWindowSize = defaultConfig.LatencyWindowSize
+	}
+
+	if config.Percentile <= 0 || config.Percentile > 1 {
+		config.Percentile = defaultConfig.Percentile
+	}
+
+	if config.WaitTime <= 0 {
+		config.WaitTime = defaultConfig.WaitTime
+	}
+
+	if config.TrendAnalysisMinSampleCount <= 0 {
+		config.TrendAnalysisMinSampleCount = defaultConfig.TrendAnalysisMinSampleCount
+	}
 
 	// If OpsGenie config is nil, initialize with default values
 	if config.OpsGenie == nil {
 		config.OpsGenie = &OpsGenieConfig{Enabled: false}
 	}
 
-	return &config, err
+	log.Printf("Config loaded: Memory threshold: %.2f%%, Latency threshold: %dms",
+		config.MemoryThreshold, config.LatencyThreshold)
+
+	return &config, nil
 }
 
 // LoadOpsGenieConfig loads the OpsGenie configuration from the given path
