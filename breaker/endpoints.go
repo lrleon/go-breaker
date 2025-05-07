@@ -654,6 +654,8 @@ func (b *BreakerAPI) UpdateOpsGenieTriggers(ctx *gin.Context) {
 	})
 }
 
+// TODO: modify this endpoint for receiving a jsoncontaining the list of tags
+// TODO: add new endpoint spec to toml file
 // UpdateOpsGenieTags updates the tags for OpsGenie alerts
 func (b *BreakerAPI) UpdateOpsGenieTags(ctx *gin.Context) {
 	b.lock.Lock()
