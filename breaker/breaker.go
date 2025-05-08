@@ -17,6 +17,7 @@ type Breaker interface {
 	IsEnabled() bool
 	Disable()
 	Enable()
+	GetConfigFile() string
 }
 
 type BreakerDriver struct {
@@ -28,6 +29,7 @@ type BreakerDriver struct {
 	enabled        bool
 	logger         *Logger
 	opsGenieClient *OpsGenieClient // OpsGenie client for sending alerts
+	configFile     string          // Path to the config file that was used to create this breaker
 }
 
 func (b *BreakerDriver) IsEnabled() bool {
@@ -46,7 +48,8 @@ func (b *BreakerDriver) Enable() {
 	b.Reset()
 }
 
-func NewBreaker(config *Config) Breaker {
+func NewBreaker(config *Config, configFile string) Breaker {
+
 	lw := NewLatencyWindow(config.LatencyWindowSize)
 
 	// Use the WaitTime value (in seconds) as the maximum age for latencies
@@ -103,11 +106,12 @@ func NewBreaker(config *Config) Breaker {
 		enabled:        true,
 		logger:         logger,
 		opsGenieClient: opsGenieClient,
+		configFile:     configFile,
 	}
 }
 
 // NewBreakerFromConfigFile creates a new Breaker instance from a TOML configuration file.
-// It reads the configuration from the specified file path, and if successful,
+// This function takes a path to a TOML file, attempts to load the configuration from it, and if successful,
 // it initializes and returns a new Breaker with that configuration.
 // If the file cannot be read or parsed, it returns an error.
 func NewBreakerFromConfigFile(configPath string) (Breaker, error) {
@@ -130,8 +134,8 @@ func NewBreakerFromConfigFile(configPath string) (Breaker, error) {
 		}
 	}
 
-	// Create the breaker with the loaded configuration
-	return NewBreaker(config), nil
+	// Create the breaker with the loaded configuration and remember the config file path
+	return NewBreaker(config, configPath), nil
 }
 
 // Return true if the memory usage is above the threshold and the LatencyWindow
@@ -343,4 +347,16 @@ func (b *BreakerDriver) Reset() {
 // LatencyOK reports whether the current latency percentile is below the configured threshold
 func (b *BreakerDriver) LatencyOK() bool {
 	return b.latencyWindow.BelowThreshold(b.config.LatencyThreshold)
+}
+
+// GetConfigFile returns the configuration file path that was used to create this breaker
+func (b *BreakerDriver) GetConfigFile() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Default to the standard config path if not set
+	if b.configFile == "" {
+		return "breakers.toml"
+	}
+	return b.configFile
 }

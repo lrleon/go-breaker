@@ -42,7 +42,7 @@ type BreakerAPI struct {
 func NewBreakerAPI(config *Config) *BreakerAPI {
 	return &BreakerAPI{
 		Config: *config,
-		Driver: NewBreaker(config),
+		Driver: NewBreaker(config, "breakers.toml"),
 	}
 }
 
@@ -87,7 +87,8 @@ func (b *BreakerAPI) SetMemory(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.MemoryThreshold = float64(threshold)
-	err := SaveConfig("breakers.toml", &b.Config)
+	configFile := b.Driver.GetConfigFile()
+	err := SaveConfig(configFile, &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -115,8 +116,8 @@ func (b *BreakerAPI) SetLatency(ctx *gin.Context) {
 	threshold := request.Threshold
 
 	// error if a latency threshold is less than 5 ms or greater or equal than 5000 ms
-	if threshold < 5 || threshold >= 5000 {
-		log.Printf("Invalid latency threshold: %v", threshold)
+	if threshold < 5 {
+		log.Printf("Invalid latency threshold: %v. must be >= 5", threshold)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid latency threshold"})
 		return
 	}
@@ -125,7 +126,8 @@ func (b *BreakerAPI) SetLatency(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.LatencyThreshold = int64(threshold)
-	err := SaveConfig("breakers.toml", &b.Config)
+	configFile := b.Driver.GetConfigFile()
+	err := SaveConfig(configFile, &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -163,7 +165,8 @@ func (b *BreakerAPI) SetLatencyWindowSize(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.LatencyWindowSize = size
-	err := SaveConfig("breakers.toml", &b.Config)
+	configFile := b.Driver.GetConfigFile()
+	err := SaveConfig(configFile, &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -208,7 +211,8 @@ func (b *BreakerAPI) SetPercentile(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.Percentile = percentile / 100.0
-	err := SaveConfig("breakers.toml", &b.Config)
+	configFile := b.Driver.GetConfigFile()
+	err := SaveConfig(configFile, &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -246,7 +250,8 @@ func (b *BreakerAPI) SetWait(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.WaitTime = wait
-	err := SaveConfig("breakers.toml", &b.Config)
+	configFile := b.Driver.GetConfigFile()
+	err := SaveConfig(configFile, &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -296,7 +301,8 @@ func (b *BreakerAPI) SetTrendAnalysis(ctx *gin.Context) {
 	defer b.lock.Unlock()
 
 	b.Config.TrendAnalysisEnabled = enabled
-	err := SaveConfig("breakers.toml", &b.Config)
+	configFile := b.Driver.GetConfigFile()
+	err := SaveConfig(configFile, &b.Config)
 	if err != nil {
 		log.Printf("Failed to save Config: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save Config"})
@@ -556,7 +562,8 @@ func (b *BreakerAPI) ToggleOpsGenie(ctx *gin.Context) {
 	b.Config.OpsGenie.Enabled = request.Enabled
 
 	// Save the changes
-	err := SaveConfig(configPath, &b.Config)
+	configFile := b.Driver.GetConfigFile()
+	err := SaveConfig(configFile, &b.Config)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to save config: %v", err)})
 		return
@@ -601,7 +608,8 @@ func (b *BreakerAPI) UpdateOpsGeniePriority(ctx *gin.Context) {
 	b.Config.OpsGenie.Priority = request.Priority
 
 	// Save the changes
-	err := SaveConfig(configPath, &b.Config)
+	configFile := b.Driver.GetConfigFile()
+	err := SaveConfig(configFile, &b.Config)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to save config: %v", err)})
 		return
@@ -639,7 +647,8 @@ func (b *BreakerAPI) UpdateOpsGenieTriggers(ctx *gin.Context) {
 	}
 
 	// Save the changes
-	err := SaveConfig(configPath, &b.Config)
+	configFile := b.Driver.GetConfigFile()
+	err := SaveConfig(configFile, &b.Config)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to save config: %v", err)})
 		return
@@ -671,7 +680,8 @@ func (b *BreakerAPI) UpdateOpsGenieTags(ctx *gin.Context) {
 	b.Config.OpsGenie.Tags = request.Tags
 
 	// Save the changes
-	err := SaveConfig(configPath, &b.Config)
+	configFile := b.Driver.GetConfigFile()
+	err := SaveConfig(configFile, &b.Config)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to save config: %v", err)})
 		return
@@ -704,7 +714,8 @@ func (b *BreakerAPI) UpdateOpsGenieCooldown(ctx *gin.Context) {
 	b.Config.OpsGenie.AlertCooldownSeconds = request.CooldownSeconds
 
 	// Save the changes
-	err := SaveConfig(configPath, &b.Config)
+	configFile := b.Driver.GetConfigFile()
+	err := SaveConfig(configFile, &b.Config)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to save config: %v", err)})
 		return

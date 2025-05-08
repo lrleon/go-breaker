@@ -18,7 +18,7 @@ func Test_breaker_should_not_trigger_if_latencies_are_below_threshold(t *testing
 		LatencyWindowSize: 10,
 		Percentile:        0.95,
 		WaitTime:          10,
-	})
+	}, "test_breakers.toml")
 
 	// Add 100 latencies below the threshold and verify the breaker is not triggered
 	for i := 0; i < 100; i++ {
@@ -51,7 +51,7 @@ func Test_breaker_should_trigger_if_latencies_are_above_threshold(t *testing.T) 
 		LatencyWindowSize: 10,
 		Percentile:        0.95,
 		WaitTime:          10, // 10 seconds
-	})
+	}, "test_breakers.toml")
 
 	// Add 10 latencies so the 95th percentile is above the threshold
 	for i := 0; i < 10; i++ {
@@ -78,7 +78,7 @@ func Test_breaker_should_trigger_if_memory_is_above_threshold(t *testing.T) {
 		LatencyWindowSize: 10,
 		Percentile:        0.95,
 		WaitTime:          10,
-	})
+	}, "test_breakers.toml")
 
 	// Reset any previous memory override that might be left over from other tests
 	breaker.SetMemoryOK(nil, true)
@@ -123,7 +123,7 @@ func Test_breaker_should_trigger_if_memory_is_above_threshold_and_latencies_are_
 		LatencyWindowSize: 10,
 		Percentile:        0.95,
 		WaitTime:          10,
-	})
+	}, "test_breakers.toml")
 
 	// Add 10 latencies above the threshold and verify the breaker is triggered
 	for i := 0; i < 10; i++ {
@@ -174,7 +174,7 @@ func Test_Breaker_Enable_Disable(t *testing.T) {
 		LatencyWindowSize: 10,
 		Percentile:        0.95,
 		WaitTime:          10,
-	})
+	}, "test_breakers.toml")
 
 	breaker.MemoryLimit = 512 * 1024 * 1024 // 512 MB
 
