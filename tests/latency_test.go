@@ -124,7 +124,7 @@ func Test_latencyWindow_expiration(t *testing.T) {
 	// Latencies we just added should be considered old
 	futureTime := now.Add(10 * time.Minute)
 
-	// Create a new window with the same parameters but that considers latencies
+	// Create a new window with the same parameters, but that considers latencies
 	// as if we were in the future
 	lwFuture := breaker.NewLatencyWindow(10)
 	lwFuture.MaxAgeSeconds = 300
@@ -212,7 +212,7 @@ func Test_breaker_withTrendAnalysis(t *testing.T) {
 	}
 
 	// Override MemoryOK to always return true for testing
-	originalBreaker := breaker.NewBreaker(config).(*breaker.BreakerDriver)
+	originalBreaker := breaker.NewBreaker(config, "breaker-config.toml").(*breaker.BreakerDriver)
 
 	// Expose the MemoryOK method for testing
 	breaker.SetMemoryOK(originalBreaker, true)
@@ -269,7 +269,7 @@ func Test_breaker_withTrendAnalysis(t *testing.T) {
 
 	// Reset and test with trend analysis disabled
 	config.TrendAnalysisEnabled = false
-	b = breaker.NewBreaker(config).(*breaker.BreakerDriver)
+	b = breaker.NewBreaker(config, "breaker-config.toml").(*breaker.BreakerDriver)
 	breaker.SetMemoryOK(b, true) // Override memory check
 
 	// Add latencies over threshold but with negative trend

@@ -21,7 +21,7 @@ func TestBreakerTriggersWithIncreasingTrend(t *testing.T) {
 		TrendAnalysisMinSampleCount: 5, // Requires more samples for analysis
 	}
 
-	b := breaker.NewBreaker(config)
+	b := breaker.NewBreaker(config, "test_breakers_trend.toml")
 
 	// Ensure memory checks don't interfere
 	breaker.SetMemoryOK(b.(*breaker.BreakerDriver), true)
@@ -140,7 +140,7 @@ func TestBreakerTriggersWithIncreasingTrend(t *testing.T) {
 		// Create new breaker with trend analysis disabled
 		configNoTrend := *config
 		configNoTrend.TrendAnalysisEnabled = false
-		bNoTrend := breaker.NewBreaker(&configNoTrend)
+		bNoTrend := breaker.NewBreaker(&configNoTrend, "test_breakers_no_trend.toml")
 		breaker.SetMemoryOK(bNoTrend.(*breaker.BreakerDriver), true)
 
 		// Add latencies above threshold but with downward trend
@@ -166,10 +166,10 @@ func TestBreakerPreciseTriggerPoint(t *testing.T) {
 		Percentile:                  0.95,
 		WaitTime:                    60,
 		TrendAnalysisEnabled:        true,
-		TrendAnalysisMinSampleCount: 3, // Only 3 samples needed to detect trend
+		TrendAnalysisMinSampleCount: 3, // Only 3 samples needed to detect the trend
 	}
 
-	b := breaker.NewBreaker(config)
+	b := breaker.NewBreaker(config, "test_breakers_precise_trigger.toml")
 	breaker.SetMemoryOK(b.(*breaker.BreakerDriver), true)
 
 	now := time.Now()
@@ -296,7 +296,7 @@ func TestBreakerWithDifferentTrendPatterns(t *testing.T) {
 	// Test each pattern
 	for name, pattern := range patterns {
 		t.Run(name, func(t *testing.T) {
-			b := breaker.NewBreaker(config)
+			b := breaker.NewBreaker(config, "test_breakers_trend_patterns.toml")
 			breaker.SetMemoryOK(b.(*breaker.BreakerDriver), true)
 
 			now := time.Now()

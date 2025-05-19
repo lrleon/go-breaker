@@ -17,6 +17,7 @@ type Breaker interface {
 	IsEnabled() bool
 	Disable()
 	Enable()
+	GetConfigFile() string
 }
 
 type BreakerDriver struct {
@@ -28,6 +29,7 @@ type BreakerDriver struct {
 	enabled        bool
 	logger         *Logger
 	opsGenieClient *OpsGenieClient // OpsGenie client for sending alerts
+	configFile     string          // Path to the config file that was used to create this breaker
 }
 
 func (b *BreakerDriver) IsEnabled() bool {
@@ -46,7 +48,8 @@ func (b *BreakerDriver) Enable() {
 	b.Reset()
 }
 
-func NewBreaker(config *Config) Breaker {
+func NewBreaker(config *Config, configFile string) Breaker {
+
 	lw := NewLatencyWindow(config.LatencyWindowSize)
 
 	// Use the WaitTime value (in seconds) as the maximum age for latencies
@@ -72,7 +75,7 @@ func NewBreaker(config *Config) Breaker {
 	// Default values in case of not having a valid memory limit
 	currentMemMB := int64(memStats.Alloc) / 1024 / 1024
 	var memThresholdMB int64 = 0
-	var memoryOK bool = true
+	var memoryOK = true
 
 	if MemoryLimit <= 0 {
 		logger.Logf("Breaker initialized - Warning: Cannot determine memory limit. Memory checks will be skipped.")
@@ -103,11 +106,12 @@ func NewBreaker(config *Config) Breaker {
 		enabled:        true,
 		logger:         logger,
 		opsGenieClient: opsGenieClient,
+		configFile:     configFile,
 	}
 }
 
 // NewBreakerFromConfigFile creates a new Breaker instance from a TOML configuration file.
-// It reads the configuration from the specified file path, and if successful,
+// This function takes a path to a TOML file, attempts to load the configuration from it, and if successful,
 // it initializes and returns a new Breaker with that configuration.
 // If the file cannot be read or parsed, it returns an error.
 func NewBreakerFromConfigFile(configPath string) (Breaker, error) {
@@ -117,7 +121,7 @@ func NewBreakerFromConfigFile(configPath string) (Breaker, error) {
 		return nil, err
 	}
 
-	// If OpsGenie section is present but incomplete, try loading from separate OpsGenie config file
+	// If the OpsGenie section is present but incomplete, try loading from a separate OpsGenie config file
 	if config.OpsGenie != nil && config.OpsGenie.Enabled && config.OpsGenie.APIKey == "" {
 		// Try to load from the default OpsGenie config path
 		opsGenieConfig, opsGenieErr := LoadOpsGenieConfig(GetOpsGenieConfigPath())
@@ -130,8 +134,8 @@ func NewBreakerFromConfigFile(configPath string) (Breaker, error) {
 		}
 	}
 
-	// Create the breaker with the loaded configuration
-	return NewBreaker(config), nil
+	// Create the breaker with the loaded configuration and remember the config file path
+	return NewBreaker(config, configPath), nil
 }
 
 // Return true if the memory usage is above the threshold and the LatencyWindow
@@ -208,7 +212,7 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 	b.logger.Logf("Status check: memory_ok=%v, latency_percentile=%dms, threshold=%dms, above_threshold=%v",
 		memoryStatus, latencyPercentile, b.config.LatencyThreshold, latencyAboveThreshold)
 
-	// Add explicit log when latency exceeds threshold
+	// Add explicit log when latency exceeds the threshold
 	if latencyAboveThreshold {
 		b.logger.Logf("ALERT: Latency %dms exceeds threshold of %dms", latencyPercentile, b.config.LatencyThreshold)
 	}
@@ -343,4 +347,16 @@ func (b *BreakerDriver) Reset() {
 // LatencyOK reports whether the current latency percentile is below the configured threshold
 func (b *BreakerDriver) LatencyOK() bool {
 	return b.latencyWindow.BelowThreshold(b.config.LatencyThreshold)
+}
+
+// GetConfigFile returns the configuration file path used to create this breaker
+func (b *BreakerDriver) GetConfigFile() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Default to the standard config path if not set
+	if b.configFile == "" {
+		return "breakers.toml"
+	}
+	return b.configFile
 }
