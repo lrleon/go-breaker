@@ -211,6 +211,7 @@ func LoadFullConfig(mainPath, opsGeniePath string) (*Config, error) {
 }
 
 func SaveConfig(path string, config *Config) error {
+
 	file, err := os.Create(path)
 	if err != nil {
 		return err
@@ -222,6 +223,9 @@ func SaveConfig(path string, config *Config) error {
 			log.Printf("Error closing file: %v", err)
 		}
 	}(file)
+
+	defer log.Printf("Config saved: Memory threshold: %.2f%%, Latency threshold: %dms, Latency window size: %d, Percentile: %.2f, Wait time: %d, Trend analysis min sample count: %d",
+		config.MemoryThreshold, config.LatencyThreshold, config.LatencyWindowSize, config.Percentile, config.WaitTime, config.TrendAnalysisMinSampleCount)
 
 	encoder := toml.NewEncoder(file)
 	return encoder.Encode(config)
