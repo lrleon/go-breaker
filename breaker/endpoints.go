@@ -106,6 +106,7 @@ func (b *BreakerAPI) GetMemory(ctx *gin.Context) {
 }
 
 func (b *BreakerAPI) SetLatency(ctx *gin.Context) {
+
 	var request LatencyThresholdRequest
 	if err := ctx.ShouldBindJSON(&request); err != nil {
 		log.Printf("Invalid latency threshold request: %v", err)

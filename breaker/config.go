@@ -211,8 +211,13 @@ func LoadFullConfig(mainPath, opsGeniePath string) (*Config, error) {
 }
 
 func SaveConfig(path string, config *Config) error {
-
 	file, err := os.Create(path)
+
+	log.Printf("Saving config to %s", path)
+
+	// print the config to the console for debugging
+	log.Printf("Config: %+v", config)
+
 	if err != nil {
 		return err
 	}
@@ -224,11 +229,16 @@ func SaveConfig(path string, config *Config) error {
 		}
 	}(file)
 
-	defer log.Printf("Config saved: Memory threshold: %.2f%%, Latency threshold: %dms, Latency window size: %d, Percentile: %.2f, Wait time: %d, Trend analysis min sample count: %d",
+	encoder := toml.NewEncoder(file)
+	err = encoder.Encode(config)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Config saved: Memory threshold: %.2f%%, Latency threshold: %dms, Latency window size: %d, Percentile: %.2f, Wait time: %d, Trend analysis min sample count: %d",
 		config.MemoryThreshold, config.LatencyThreshold, config.LatencyWindowSize, config.Percentile, config.WaitTime, config.TrendAnalysisMinSampleCount)
 
-	encoder := toml.NewEncoder(file)
-	return encoder.Encode(config)
+	return nil
 }
 
 // SaveOpsGenieConfig saves the OpsGenie configuration to the given path
