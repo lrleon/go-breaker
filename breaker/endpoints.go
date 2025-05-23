@@ -46,6 +46,14 @@ func NewBreakerAPI(config *Config) *BreakerAPI {
 	}
 }
 
+func NewBreakerAPIFromFile(pathToConfig string) *BreakerAPI {
+	config, err := LoadConfig(pathToConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return NewBreakerAPI(config)
+}
+
 func (b *BreakerAPI) SetEnabled(ctx *gin.Context) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
