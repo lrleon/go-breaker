@@ -46,6 +46,14 @@ func NewBreakerAPI(config *Config) *BreakerAPI {
 	}
 }
 
+func NewBreakerAPIFromFile(pathToConfig string) *BreakerAPI {
+	config, err := LoadConfig(pathToConfig)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return NewBreakerAPI(config)
+}
+
 func (b *BreakerAPI) SetEnabled(ctx *gin.Context) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
@@ -106,6 +114,7 @@ func (b *BreakerAPI) GetMemory(ctx *gin.Context) {
 }
 
 func (b *BreakerAPI) SetLatency(ctx *gin.Context) {
+
 	var request LatencyThresholdRequest
 	if err := ctx.ShouldBindJSON(&request); err != nil {
 		log.Printf("Invalid latency threshold request: %v", err)
