@@ -46,12 +46,12 @@ func NewBreakerAPI(config *Config) *BreakerAPI {
 	}
 }
 
-func NewBreakerAPIFromFile(pathToConfig string) *BreakerAPI {
+func NewBreakerAPIFromFile(pathToConfig string) (*BreakerAPI, error) {
 	config, err := LoadConfig(pathToConfig)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("failed to load config from file: %w", err)
 	}
-	return NewBreakerAPI(config)
+	return NewBreakerAPI(config), nil
 }
 
 func (b *BreakerAPI) SetEnabled(ctx *gin.Context) {

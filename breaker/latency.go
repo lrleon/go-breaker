@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// LatencyRecord stores a latency along with its timestamp
+// LatencyRecord stores latency along with its timestamp
 type LatencyRecord struct {
 	Value     int64
 	Timestamp time.Time
@@ -17,7 +17,7 @@ type LatencyWindow struct {
 	Index         int
 	Size          int
 	NeedToSort    bool
-	MaxAgeSeconds int // Maximum age in seconds to consider a latency valid
+	MaxAgeSeconds int // Maximum age in seconds to consider latency valid
 }
 
 func NewLatencyWindow(size int) *LatencyWindow {
