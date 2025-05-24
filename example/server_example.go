@@ -503,7 +503,8 @@ func main() {
 		log.Printf("   OPSGENIE_API_KEY = %s", getEnvStatus("OPSGENIE_API_KEY"))
 		log.Printf("   Environment = %s", getEnvStatus("Environment"))
 
-		if err := cb.ValidateOpsGenieAtStartup(config); err != nil {
+		client := cb.GetOpsGenieClient(config.OpsGenie)
+		if err := client.ValidateConfigurationAtStartup(); err != nil {
 			log.Printf("⚠️  OpsGenie validation warnings: %v", err)
 			log.Printf("📘 You can still test, but alerts may use fallback values")
 		} else {
