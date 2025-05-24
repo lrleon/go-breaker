@@ -16,7 +16,7 @@ import (
 
 var delayInMilliseconds time.Duration = 1000
 
-const defaultConfigPath = "breakers.toml"
+const defaultConfigPath = "breaker-config.toml"
 
 var breakerAPI *cb.BreakerAPI
 var ApiBreaker cb.Breaker
