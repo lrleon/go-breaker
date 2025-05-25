@@ -98,27 +98,6 @@ func NewOpsGenieClient(config *OpsGenieConfig) *OpsGenieClient {
 	}
 }
 
-// determineEnvironment detects the current runtime environment
-func determineEnvironment() Environment {
-	envValue := os.Getenv(EnvEnvironment)
-
-	switch envValue {
-	case string(EnvDevelopment):
-		return EnvDevelopment
-	case string(EnvUAT):
-		return EnvUAT
-	case string(EnvProduction):
-		return EnvProduction
-	default:
-		if envValue == "" {
-			log.Println("Environment not specified, defaulting to development")
-		} else {
-			log.Printf("Unknown environment '%s', defaulting to development", envValue)
-		}
-		return EnvDevelopment
-	}
-}
-
 // ValidateMandatoryFields validates that all mandatory fields are present and valid
 func (o *OpsGenieClient) ValidateMandatoryFields() *MandatoryFieldsValidationError {
 	if o == nil || o.config == nil {
@@ -574,19 +553,17 @@ func (o *OpsGenieClient) getAPIIdentifier() string {
 	return o.config.Source
 }
 
-// En opsgenie.go, modificar la función buildEnhancedTags
-
-// processAndValidateTags procesa las tags simples y marca las que no tienen formato key:value
+// processAndValidateTags Process the simple tags and marks those that have no key format: Value
 func (o *OpsGenieClient) processAndValidateTags(alertType string) []string {
 	var processedTags []string
 
-	// Procesar tags de configuración
+	//Process configuration tags
 	for _, tag := range o.config.Tags {
 		processedTag := o.processTag(tag)
 		processedTags = append(processedTags, processedTag)
 	}
 
-	// Agregar tags automáticas del sistema
+	// Add automatic system tags
 	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
 
 	systemTags := []string{
@@ -598,10 +575,10 @@ func (o *OpsGenieClient) processAndValidateTags(alertType string) []string {
 		fmt.Sprintf("AlertType:%s", alertType),
 	}
 
-	// Agregar tags del sistema
+	// Add system tags
 	processedTags = append(processedTags, systemTags...)
 
-	// Agregar tags específicas del servicio si están disponibles
+	// Add specific service tags if available
 	if o.config.APIName != "" {
 		processedTags = append(processedTags, fmt.Sprintf("Service:%s", o.config.APIName))
 	}
@@ -610,7 +587,7 @@ func (o *OpsGenieClient) processAndValidateTags(alertType string) []string {
 		processedTags = append(processedTags, fmt.Sprintf("Tier:%s", o.config.ServiceTier))
 	}
 
-	// Agregar context adicional si está disponible
+	// Add additional context if available
 	if additionalContext := o.getAdditionalContext(); additionalContext != "" {
 		processedTags = append(processedTags, fmt.Sprintf("Context:%s", additionalContext))
 	}
@@ -618,27 +595,36 @@ func (o *OpsGenieClient) processAndValidateTags(alertType string) []string {
 	return processedTags
 }
 
-// processTag procesa una tag individual y la marca si no tiene formato key:value
+// processTag Process an individual tag and the brand if it does not have key format: Value
 func (o *OpsGenieClient) processTag(tag string) string {
-	// Verificar si la tag tiene formato "key:value"
+	// Verify if the tag has "Key: Value" format
 	if strings.Contains(tag, ":") {
 		parts := strings.SplitN(tag, ":", 2)
 		if len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
-			// Tag válida con formato key:value
+			// Valid Tag with Key format: Value
 			return tag
 		}
 	}
 
-	// Tag sin formato key:value - marcarla claramente
+	// Tag without Key format: Value - Mark it
 	return fmt.Sprintf("**TAG_KEY_UNDEFINED**:%s", tag)
 }
 
-// buildEnhancedTags - versión simplificada que usa el nuevo sistema
+// buildEnhancedTags processes and validates tags for an alert, adding both user-defined
+// // and system-generated tags. It ensures that all tags follow a valid "key:value" format
+// // and marks those without a key as "**TAG_KEY_UNDEFINED**".
+// //
+// // Parameters:
+// //   - alertType: A string representing the type of alert (e.g., "circuit-open", "memory-threshold").
+// //
+// // Returns:
+// //   - A slice of strings containing the processed and validated tags, including both
+// //     user-defined and system-generated tags.
 func (o *OpsGenieClient) buildEnhancedTags(alertType string) []string {
 	return o.processAndValidateTags(alertType)
 }
 
-// validateTagsConfiguration valida la configuración de tags y muestra advertencias
+// validateTagsConfiguration Valida the tag configuration and shows warnings
 func (o *OpsGenieClient) validateTagsConfiguration() {
 	if o == nil || o.config == nil {
 		return

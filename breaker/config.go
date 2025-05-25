@@ -97,7 +97,7 @@ type Config struct {
 	OpsGenie *OpsGenieConfig `toml:"opsgenie"` // OpsGenie configuration
 }
 
-// TOMLValidationError representa un error específico con información de línea
+// TOMLValidationError represents a specific error with line information
 type TOMLValidationError struct {
 	Field      string
 	Value      interface{}
@@ -112,7 +112,7 @@ func (e *TOMLValidationError) Error() string {
 		e.ConfigPath, e.Line, e.Field, e.Message)
 }
 
-// TOMLConfigLoader maneja la carga y validación de archivos TOML con logging detallado
+// TOMLConfigLoader handles the load and validation of Toml files with detailed logging
 type TOMLConfigLoader struct {
 	configPath   string
 	absolutePath string
@@ -120,26 +120,26 @@ type TOMLConfigLoader struct {
 	lines        []string
 }
 
-// NewTOMLConfigLoader crea un nuevo loader con la ruta especificada
+// NewTOMLConfigLoader create a new loader with the specified route
 func NewTOMLConfigLoader(configPath string) (*TOMLConfigLoader, error) {
-	// Obtener ruta absoluta
+	// Get absolute route
 	absPath, err := filepath.Abs(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path for %s: %v", configPath, err)
 	}
 
-	// Leer contenido del archivo
+	//Read file content
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file %s: %v", absPath, err)
 	}
 
-	// Log de archivo encontrado
+	// File log found
 	log.Printf("📁 Loading TOML configuration:")
 	log.Printf("   File: %s", configPath)
 	log.Printf("   Absolute path: %s", absPath)
 
-	// Obtener información del archivo
+	// Get file information
 	fileInfo, err := os.Stat(absPath)
 	if err == nil {
 		log.Printf("   Size: %d bytes", fileInfo.Size())
@@ -154,23 +154,23 @@ func NewTOMLConfigLoader(configPath string) (*TOMLConfigLoader, error) {
 	}, nil
 }
 
-// findFieldLine busca en qué línea está definido un campo específico
+// findFieldLine search which line is defined a specific field
 func (loader *TOMLConfigLoader) findFieldLine(fieldPath string) int {
-	// Convertir dot notation a formato TOML
-	// Ej: "OpsGenie.Team" -> buscar "team" en sección [opsgenie]
+	// Convert dot notation to TOML
+	// Ej: "OpsGenie.Team" -> search team in section [opsgenie]
 	parts := strings.Split(fieldPath, ".")
 
 	if len(parts) == 1 {
-		// Campo de nivel raíz
+		// Root level
 		fieldName := strings.ToLower(parts[0])
 		for i, line := range loader.lines {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmed, fieldName+" =") {
-				return i + 1 // Las líneas empiezan en 1
+				return i + 1 // The lines begin in 1
 			}
 		}
 	} else if len(parts) == 2 {
-		// Campo en sección
+		// Field in section
 		sectionName := strings.ToLower(parts[0])
 		fieldName := strings.ToLower(parts[1])
 
@@ -178,29 +178,29 @@ func (loader *TOMLConfigLoader) findFieldLine(fieldPath string) int {
 		for i, line := range loader.lines {
 			trimmed := strings.TrimSpace(line)
 
-			// Detectar inicio de sección
+			// Detect login
 			if trimmed == fmt.Sprintf("[%s]", sectionName) {
 				inSection = true
 				continue
 			}
 
-			// Detectar nueva sección
+			// detect new section
 			if inSection && strings.HasPrefix(trimmed, "[") && trimmed != fmt.Sprintf("[%s]", sectionName) {
 				inSection = false
 				continue
 			}
 
-			// Buscar campo en la sección actual
+			// Find a field in the current section
 			if inSection && strings.HasPrefix(trimmed, fieldName+" =") {
 				return i + 1
 			}
 		}
 	}
 
-	return 0 // No encontrado
+	return 0 // Not found
 }
 
-// validateAndLog valida un campo y registra warnings/errores con números de línea
+// validateAndLog Validate a field and records warnings/errors with line numbers
 func (loader *TOMLConfigLoader) validateAndLog(fieldPath string, currentValue interface{}, expectedType string, isValid bool, message string) {
 	line := loader.findFieldLine(fieldPath)
 
@@ -278,7 +278,7 @@ func createDefaultConfig() *Config {
 
 // LoadConfig loads configuration from a TOML file with enhanced error handling and validation
 func LoadConfig(path string) (*Config, error) {
-	// Crear loader con logging detallado
+	// Create Loader with detailed logging
 	loader, err := NewTOMLConfigLoader(path)
 	if err != nil {
 		return nil, err
@@ -387,7 +387,126 @@ func LoadConfig(path string) (*Config, error) {
 	return &config, nil
 }
 
-// validateOpsGenieConfigWithLineNumbers valida la configuración de OpsGenie con números de línea
+// findTagLines Look for the lines where tags are defined in the array
+func (loader *TOMLConfigLoader) findTagLines() []int {
+	var tagLines []int
+	inOpsGenieSection := false
+	inTagsArray := false
+
+	for i, line := range loader.lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Detect section start [Opsgenie]
+		if trimmed == "[opsgenie]" {
+			inOpsGenieSection = true
+			continue
+		}
+
+		// Detect new section (exit OPSGENIE)
+		if inOpsGenieSection && strings.HasPrefix(trimmed, "[") && trimmed != "[opsgenie]" {
+			inOpsGenieSection = false
+			inTagsArray = false
+			continue
+		}
+
+		// Detect Tags Array
+		if inOpsGenieSection && (strings.HasPrefix(trimmed, "tags = [") || trimmed == "tags = [") {
+			inTagsArray = true
+
+			// If the definition is in a single line
+			if strings.Contains(trimmed, "]") {
+				// Array in a single line: Tags = ["Tag1", "Tag2", "Tag3"]
+				tagLines = append(tagLines, parseTagsFromSingleLine(trimmed, i+1)...)
+				inTagsArray = false
+			}
+			continue
+		}
+
+		// If we are inside the tag array (multilinear)
+		if inTagsArray {
+			// Detect an end of array
+			if strings.Contains(trimmed, "]") {
+				// Process last line if you have tags
+				if len(strings.TrimSpace(strings.Replace(trimmed, "]", "", -1))) > 0 {
+					lineNumbers := parseTagsFromArrayLine(trimmed, i+1)
+					tagLines = append(tagLines, lineNumbers...)
+				}
+				inTagsArray = false
+			} else if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				// Line inside the array with tags
+				lineNumbers := parseTagsFromArrayLine(trimmed, i+1)
+				tagLines = append(tagLines, lineNumbers...)
+			}
+		}
+	}
+
+	return tagLines
+}
+
+// parseTagsFromSingleLine extract tags from a line like: tags = ["tag1", "tag2"]
+func parseTagsFromSingleLine(line string, lineNumber int) []int {
+	var lines []int
+
+	// Extract content between [Y]]
+	start := strings.Index(line, "[")
+	end := strings.LastIndex(line, "]")
+
+	if start != -1 && end != -1 && end > start {
+		content := line[start+1 : end]
+		tags := parseTagsFromContent(content)
+
+		// All tags are on the same line
+		for range tags {
+			lines = append(lines, lineNumber)
+		}
+	}
+
+	return lines
+}
+
+// parseTagsFromArrayLine extract tags from a line inside a multiline
+func parseTagsFromArrayLine(line string, lineNumber int) []int {
+	var lines []int
+
+	// Clean the bracket and commas line
+	cleaned := strings.ReplaceAll(line, "]", "")
+	cleaned = strings.TrimSpace(cleaned)
+
+	if cleaned != "" {
+		tags := parseTagsFromContent(cleaned)
+
+		// Each tag found in this line
+		for range tags {
+			lines = append(lines, lineNumber)
+		}
+	}
+
+	return lines
+}
+
+// parseTagsFromContent Extract individual tags from content
+func parseTagsFromContent(content string) []string {
+	var tags []string
+
+	// Divide by commas and process each element
+	parts := strings.Split(content, ",")
+
+	for _, part := range parts {
+		cleaned := strings.TrimSpace(part)
+
+		// Remove quotes
+		cleaned = strings.Trim(cleaned, `"'`)
+		cleaned = strings.TrimSpace(cleaned)
+
+		if cleaned != "" {
+			tags = append(tags, cleaned)
+		}
+	}
+
+	return tags
+}
+
+// validateOpsGenieConfigWithLineNumbers Validate the OPSGENIE configuration with line numbers
 func validateOpsGenieConfigWithLineNumbers(config *OpsGenieConfig, defaults *OpsGenieConfig, loader *TOMLConfigLoader) {
 	if config.Region == "" {
 		loader.validateAndLog("opsgenie.region", config.Region, "string", false,
@@ -410,8 +529,8 @@ func validateOpsGenieConfigWithLineNumbers(config *OpsGenieConfig, defaults *Ops
 			"No tags specified. Using defaults.")
 		config.Tags = defaults.Tags
 	} else {
-		loader.validateAndLog("opsgenie.tags", len(config.Tags), "[]string", true,
-			fmt.Sprintf("%d tags configured", len(config.Tags)))
+		// Validate each tag individually with its line number
+		validateTagsWithLineNumbers(config.Tags, loader)
 	}
 
 	// Validate team
@@ -451,7 +570,137 @@ func validateOpsGenieConfigWithLineNumbers(config *OpsGenieConfig, defaults *Ops
 	}
 }
 
-// logConfigSummary muestra un resumen final de la configuración cargada
+// validateTagsWithLineNumbers Validate the tags with line numbers
+func validateTagsWithLineNumbers(tags []string, loader *TOMLConfigLoader) {
+	log.Printf("🔍 Validating %d tags for key:value format...", len(tags))
+
+	var validTags []string
+	var invalidTags []string
+	var tagValidationResults []TagValidationResult
+
+	// Find the lines where tags are defined
+	tagLines := loader.findTagLines()
+
+	for i, tag := range tags {
+		// Determine if the tag is valid
+		isValid := isValidKeyValueTag(tag)
+
+		// Obtain line number (if available)
+		lineNumber := 0
+		if i < len(tagLines) {
+			lineNumber = tagLines[i]
+		}
+
+		if isValid {
+			validTags = append(validTags, tag)
+			log.Printf("✅ %s:%d - Tag[%d] = '%s' (valid key:value format)",
+				loader.configPath, lineNumber, i, tag)
+		} else {
+			invalidTags = append(invalidTags, tag)
+			log.Printf("⚠️  WARNING in %s:%d - Tag[%d] = '%s' (will be marked as **TAG_KEY_UNDEFINED**)",
+				loader.configPath, lineNumber, i, tag)
+
+			tagValidationResults = append(tagValidationResults, TagValidationResult{
+				Tag:        tag,
+				LineNumber: lineNumber,
+				IsValid:    false,
+				Index:      i,
+			})
+		}
+	}
+
+	// Final Summary
+	if len(validTags) > 0 {
+		log.Printf("✅ Valid key:value tags (%d): %v", len(validTags), validTags)
+	}
+
+	if len(invalidTags) > 0 {
+		log.Printf("⚠️  Tags without key:value format (%d): %v", len(invalidTags), invalidTags)
+		log.Printf("💡 These tags will be marked as **TAG_KEY_UNDEFINED** in OpsGenie alerts")
+		log.Printf("💡 Consider using format like 'Component:circuit-breaker' instead of just 'circuit-breaker'")
+
+		// Show specific suggestions
+		for _, result := range tagValidationResults {
+			suggestedFormat := suggestTagFormat(result.Tag)
+			log.Printf("   💡 %s:%d - Suggestion: '%s' → '%s'",
+				loader.configPath, result.LineNumber, result.Tag, suggestedFormat)
+		}
+	}
+}
+
+// 🆕 Structure: Tag validation result
+type TagValidationResult struct {
+	Tag        string
+	LineNumber int
+	IsValid    bool
+	Index      int
+}
+
+// 🆕 Verify if a tag has key format: valid value
+func isValidKeyValueTag(tag string) bool {
+	// same logic as in processtag () but only validation
+	if strings.Contains(tag, ":") {
+		parts := strings.SplitN(tag, ":", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// 🆕 Suggest correct format for a tag
+func suggestTagFormat(tag string) string {
+	// Intelligent suggestions based on the content of the tag
+	tagLower := strings.ToLower(tag)
+
+	// Common tags mapping to suggested formats
+	suggestions := map[string]string{
+		"circuit-breaker": "Component:circuit-breaker",
+		"high-priority":   "Priority:high",
+		"medium-priority": "Priority:medium",
+		"low-priority":    "Priority:low",
+		"critical":        "Severity:critical",
+		"monitoring":      "Type:monitoring",
+		"automated":       "AlertType:automated",
+		"manual":          "AlertType:manual",
+		"production":      "Environment:production",
+		"staging":         "Environment:staging",
+		"development":     "Environment:development",
+		"dev":             "Environment:dev",
+		"prod":            "Environment:prod",
+		"uat":             "Environment:uat",
+		"backend":         "Team:backend",
+		"frontend":        "Team:frontend",
+		"devops":          "Team:devops",
+		"platform":        "Team:platform",
+		"api":             "Service:api",
+		"database":        "Service:database",
+		"cache":           "Service:cache",
+	}
+
+	if suggestion, exists := suggestions[tagLower]; exists {
+		return suggestion
+	}
+
+	// Patterns -based suggestions
+	if strings.Contains(tagLower, "env") || strings.Contains(tagLower, "environment") {
+		return fmt.Sprintf("Environment:%s", tag)
+	}
+	if strings.Contains(tagLower, "team") {
+		return fmt.Sprintf("Team:%s", tag)
+	}
+	if strings.Contains(tagLower, "priority") {
+		return fmt.Sprintf("Priority:%s", tag)
+	}
+	if strings.Contains(tagLower, "service") {
+		return fmt.Sprintf("Service:%s", tag)
+	}
+
+	// Generic suggestion
+	return fmt.Sprintf("Component:%s", tag)
+}
+
+// logConfigSummary shows a final summary of the loaded configuration
 func logConfigSummary(config *Config) {
 	log.Printf("📋 Configuration Summary:")
 	log.Printf("   Circuit Breaker:")
