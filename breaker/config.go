@@ -2,10 +2,13 @@ package breaker
 
 import (
 	"fmt"
-	"github.com/BurntSushi/toml"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
+
+	"github.com/BurntSushi/toml"
 )
 
 // ContactInfo for escalation and contact details
@@ -42,10 +45,6 @@ type OpsGenieConfig struct {
 	// Rate Limiting
 	AlertCooldownSeconds int `toml:"alert_cooldown_seconds"` // Minimum time between alerts
 
-	// Environment Settings
-	EnvironmentSettings map[string]EnvOpsConfig `toml:"environment_settings"` // Environment-specific settings
-	UseEnvironments     bool                    `toml:"use_environments"`     // Whether to use environment-specific settings
-
 	// MANDATORY FIELDS - Required for all alerts
 	Team         string `toml:"team"`          // ✅ MANDATORY: OpsGenie team name (must match OpsGenie)
 	Environment  string `toml:"environment"`   // ✅ MANDATORY: DEV, CI, UAT, PROD, etc. (fallback to "Environment" env var)
@@ -60,25 +59,18 @@ type OpsGenieConfig struct {
 	AdditionalContext string `toml:"additional_context"` // ✅ Optional: Any additional context you want to include
 
 	// API Information (Enhanced)
-	APINamespace        string            `toml:"api_namespace"`         // Namespace/environment of the API
-	APIName             string            `toml:"api_name"`              // Name of the API being protected
-	APIVersion          string            `toml:"api_version"`           // Version of the API
-	APIOwner            string            `toml:"api_owner"`             // Team or individual responsible for the API
-	APIDependencies     []string          `toml:"api_dependencies"`      // List of dependencies this API relies on
-	APIEndpoints        []string          `toml:"api_endpoints"`         // List of important endpoints being protected
-	APIDescription      string            `toml:"api_description"`       // Brief description of the API's purpose
-	APIPriority         string            `toml:"api_priority"`          // Business priority of the API (critical, high, medium, low)
-	APICustomAttributes map[string]string `toml:"api_custom_attributes"` // Any custom attributes for the API
+	APINamespace    string   `toml:"api_namespace"`    // Namespace/environment of the API
+	APIName         string   `toml:"api_name"`         // Name of the API being protected
+	APIVersion      string   `toml:"api_version"`      // Version of the API
+	APIOwner        string   `toml:"api_owner"`        // Team or individual responsible for the API
+	APIDependencies []string `toml:"api_dependencies"` // List of dependencies this API relies on
+	APIEndpoints    []string `toml:"api_endpoints"`    // List of important endpoints being protected
+	APIDescription  string   `toml:"api_description"`  // Brief description of the API's purpose
+	APIPriority     string   `toml:"api_priority"`     // Business priority of the API (critical, high, medium, low)
 
 	// Service Configuration
 	ServiceTier    string      `toml:"service_tier"`    // critical, high, medium, low
 	ContactDetails ContactInfo `toml:"contact_details"` // Contact information
-}
-
-// EnvOpsConfig contains environment-specific OpsGenie settings
-type EnvOpsConfig struct {
-	Enabled  bool   `toml:"enabled"`  // Whether alerts are enabled in this environment
-	Priority string `toml:"priority"` // Alert priority for this environment (P1-P5)
 }
 
 // Environment types for the application
@@ -103,6 +95,122 @@ type Config struct {
 
 	// OpsGenie Integration
 	OpsGenie *OpsGenieConfig `toml:"opsgenie"` // OpsGenie configuration
+}
+
+// TOMLValidationError representa un error específico con información de línea
+type TOMLValidationError struct {
+	Field      string
+	Value      interface{}
+	Expected   string
+	Line       int
+	ConfigPath string
+	Message    string
+}
+
+func (e *TOMLValidationError) Error() string {
+	return fmt.Sprintf("TOML validation error in %s:%d - Field '%s': %s",
+		e.ConfigPath, e.Line, e.Field, e.Message)
+}
+
+// TOMLConfigLoader maneja la carga y validación de archivos TOML con logging detallado
+type TOMLConfigLoader struct {
+	configPath   string
+	absolutePath string
+	rawContent   string
+	lines        []string
+}
+
+// NewTOMLConfigLoader crea un nuevo loader con la ruta especificada
+func NewTOMLConfigLoader(configPath string) (*TOMLConfigLoader, error) {
+	// Obtener ruta absoluta
+	absPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path for %s: %v", configPath, err)
+	}
+
+	// Leer contenido del archivo
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file %s: %v", absPath, err)
+	}
+
+	// Log de archivo encontrado
+	log.Printf("📁 Loading TOML configuration:")
+	log.Printf("   File: %s", configPath)
+	log.Printf("   Absolute path: %s", absPath)
+
+	// Obtener información del archivo
+	fileInfo, err := os.Stat(absPath)
+	if err == nil {
+		log.Printf("   Size: %d bytes", fileInfo.Size())
+		log.Printf("   Modified: %s", fileInfo.ModTime().Format("2006-01-02 15:04:05"))
+	}
+
+	return &TOMLConfigLoader{
+		configPath:   configPath,
+		absolutePath: absPath,
+		rawContent:   string(content),
+		lines:        strings.Split(string(content), "\n"),
+	}, nil
+}
+
+// findFieldLine busca en qué línea está definido un campo específico
+func (loader *TOMLConfigLoader) findFieldLine(fieldPath string) int {
+	// Convertir dot notation a formato TOML
+	// Ej: "OpsGenie.Team" -> buscar "team" en sección [opsgenie]
+	parts := strings.Split(fieldPath, ".")
+
+	if len(parts) == 1 {
+		// Campo de nivel raíz
+		fieldName := strings.ToLower(parts[0])
+		for i, line := range loader.lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, fieldName+" =") {
+				return i + 1 // Las líneas empiezan en 1
+			}
+		}
+	} else if len(parts) == 2 {
+		// Campo en sección
+		sectionName := strings.ToLower(parts[0])
+		fieldName := strings.ToLower(parts[1])
+
+		inSection := false
+		for i, line := range loader.lines {
+			trimmed := strings.TrimSpace(line)
+
+			// Detectar inicio de sección
+			if trimmed == fmt.Sprintf("[%s]", sectionName) {
+				inSection = true
+				continue
+			}
+
+			// Detectar nueva sección
+			if inSection && strings.HasPrefix(trimmed, "[") && trimmed != fmt.Sprintf("[%s]", sectionName) {
+				inSection = false
+				continue
+			}
+
+			// Buscar campo en la sección actual
+			if inSection && strings.HasPrefix(trimmed, fieldName+" =") {
+				return i + 1
+			}
+		}
+	}
+
+	return 0 // No encontrado
+}
+
+// validateAndLog valida un campo y registra warnings/errores con números de línea
+func (loader *TOMLConfigLoader) validateAndLog(fieldPath string, currentValue interface{}, expectedType string, isValid bool, message string) {
+	line := loader.findFieldLine(fieldPath)
+
+	if !isValid {
+		log.Printf("⚠️  WARNING in %s:%d - %s = %v: %s",
+			loader.configPath, line, fieldPath, currentValue, message)
+	} else {
+		log.Printf("✅ %s:%d - %s = %v (valid)",
+			loader.configPath, line, fieldPath, currentValue)
+	}
 }
 
 // Configuration file paths
@@ -150,7 +258,6 @@ func createDefaultConfig() *Config {
 			IncludeMemoryMetrics:  true,
 			IncludeSystemInfo:     true,
 			AlertCooldownSeconds:  300,
-			UseEnvironments:       false,
 			// Mandatory fields with fallback indicators
 			Team:              "",         // Will be validated and use fallbacks
 			Environment:       "",         // Will read from "Environment" env var if empty
@@ -171,16 +278,26 @@ func createDefaultConfig() *Config {
 
 // LoadConfig loads configuration from a TOML file with enhanced error handling and validation
 func LoadConfig(path string) (*Config, error) {
+	// Crear loader con logging detallado
+	loader, err := NewTOMLConfigLoader(path)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("🔍 Parsing TOML configuration...")
+
 	// Start with default config
 	defaultConfig := createDefaultConfig()
 
 	// Try to parse with the root-level structure
 	var config Config
-	_, err := toml.DecodeFile(path, &config)
+	_, err = toml.DecodeFile(loader.absolutePath, &config)
 
 	// If we failed to load or all values are zero, try the [circuit_breaker] format
 	if err != nil || (config.MemoryThreshold == 0 && config.LatencyThreshold == 0 &&
 		config.LatencyWindowSize == 0 && config.Percentile == 0) {
+
+		log.Printf("⚠️  Root-level parsing failed or incomplete, trying section-based format...")
 
 		// Try to parse with the section-based structure
 		type ConfigWithSections struct {
@@ -189,7 +306,7 @@ func LoadConfig(path string) (*Config, error) {
 		}
 
 		var sectionConfig ConfigWithSections
-		_, sectionErr := toml.DecodeFile(path, &sectionConfig)
+		_, sectionErr := toml.DecodeFile(loader.absolutePath, &sectionConfig)
 
 		if sectionErr == nil {
 			// Use values from the circuit_breaker section
@@ -199,42 +316,56 @@ func LoadConfig(path string) (*Config, error) {
 			if sectionConfig.OpsGenie != nil {
 				config.OpsGenie = sectionConfig.OpsGenie
 			}
-			log.Printf("Loaded configuration using [circuit_breaker] section format")
+			log.Printf("✅ Configuration loaded using [circuit_breaker] section format")
 		} else if err != nil {
-			log.Printf("Warning: Error loading config from %s: %v. Using default values.", path, err)
+			log.Printf("❌ ERROR loading config from %s: %v. Using default values.", loader.absolutePath, err)
 			return defaultConfig, err
 		}
+	} else {
+		log.Printf("✅ Configuration loaded using root-level format")
 	}
 
-	// Validate and set defaults for any zero or invalid values
+	log.Printf("🔍 Validating configuration values...")
+
+	// Validate and set defaults for any zero or invalid values with line numbers
 	if config.MemoryThreshold <= 0 || config.MemoryThreshold > 100 {
-		log.Printf("Warning: Invalid memory_threshold (%.2f). Using default value of %.2f.",
-			config.MemoryThreshold, defaultConfig.MemoryThreshold)
+		loader.validateAndLog("memory_threshold", config.MemoryThreshold, "float64 (0-100)", false,
+			fmt.Sprintf("Invalid value. Using default: %.2f", defaultConfig.MemoryThreshold))
 		config.MemoryThreshold = defaultConfig.MemoryThreshold
+	} else {
+		loader.validateAndLog("memory_threshold", config.MemoryThreshold, "float64", true, "")
 	}
 
 	if config.LatencyThreshold <= 0 {
-		log.Printf("Warning: Invalid latency_threshold (%d). Using default value of %d.",
-			config.LatencyThreshold, defaultConfig.LatencyThreshold)
+		loader.validateAndLog("latency_threshold", config.LatencyThreshold, "int64 (>0)", false,
+			fmt.Sprintf("Invalid value. Using default: %d", defaultConfig.LatencyThreshold))
 		config.LatencyThreshold = defaultConfig.LatencyThreshold
+	} else {
+		loader.validateAndLog("latency_threshold", config.LatencyThreshold, "int64", true, "")
 	}
 
 	if config.LatencyWindowSize <= 0 {
-		log.Printf("Warning: Invalid latency_window_size (%d). Using default value of %d.",
-			config.LatencyWindowSize, defaultConfig.LatencyWindowSize)
+		loader.validateAndLog("latency_window_size", config.LatencyWindowSize, "int (>0)", false,
+			fmt.Sprintf("Invalid value. Using default: %d", defaultConfig.LatencyWindowSize))
 		config.LatencyWindowSize = defaultConfig.LatencyWindowSize
+	} else {
+		loader.validateAndLog("latency_window_size", config.LatencyWindowSize, "int", true, "")
 	}
 
 	if config.Percentile <= 0 || config.Percentile > 1 {
-		log.Printf("Warning: Invalid percentile (%.2f). Using default value of %.2f.",
-			config.Percentile, defaultConfig.Percentile)
+		loader.validateAndLog("percentile", config.Percentile, "float64 (0-1)", false,
+			fmt.Sprintf("Invalid value. Using default: %.2f", defaultConfig.Percentile))
 		config.Percentile = defaultConfig.Percentile
+	} else {
+		loader.validateAndLog("percentile", config.Percentile, "float64", true, "")
 	}
 
 	if config.WaitTime <= 0 {
-		log.Printf("Warning: Invalid wait_time (%d). Using default value of %d.",
-			config.WaitTime, defaultConfig.WaitTime)
+		loader.validateAndLog("wait_time", config.WaitTime, "int (>0)", false,
+			fmt.Sprintf("Invalid value. Using default: %d", defaultConfig.WaitTime))
 		config.WaitTime = defaultConfig.WaitTime
+	} else {
+		loader.validateAndLog("wait_time", config.WaitTime, "int", true, "")
 	}
 
 	if config.TrendAnalysisMinSampleCount <= 0 {
@@ -243,35 +374,105 @@ func LoadConfig(path string) (*Config, error) {
 
 	// Initialize OpsGenie config if nil
 	if config.OpsGenie == nil {
-		log.Printf("No OpsGenie configuration found, using defaults")
+		log.Printf("⚠️  No OpsGenie configuration found in %s, using defaults", loader.configPath)
 		config.OpsGenie = defaultConfig.OpsGenie
 	} else {
-		// Validate and set defaults for OpsGenie config
-		validateAndSetOpsGenieDefaults(config.OpsGenie, defaultConfig.OpsGenie)
+		log.Printf("🔍 Validating OpsGenie configuration...")
+		validateOpsGenieConfigWithLineNumbers(config.OpsGenie, defaultConfig.OpsGenie, loader)
 	}
 
-	log.Printf("Config loaded successfully:")
-	log.Printf("  - Memory threshold: %.2f%%", config.MemoryThreshold)
-	log.Printf("  - Latency threshold: %dms", config.LatencyThreshold)
-	log.Printf("  - Latency window size: %d", config.LatencyWindowSize)
-	log.Printf("  - Percentile: %.2f", config.Percentile)
-	log.Printf("  - Wait time: %ds", config.WaitTime)
-	log.Printf("  - Trend analysis: %t", config.TrendAnalysisEnabled)
-
-	if config.OpsGenie != nil {
-		log.Printf("  - OpsGenie enabled: %t", config.OpsGenie.Enabled)
-		if config.OpsGenie.Enabled {
-			log.Printf("    - Team: %s", config.OpsGenie.Team)
-			log.Printf("    - Environment: %s", config.OpsGenie.Environment)
-			log.Printf("    - BookmakerID: %s", config.OpsGenie.BookmakerID)
-			log.Printf("    - Business: %s", config.OpsGenie.Business)
-			if config.OpsGenie.AdditionalContext != "" {
-				log.Printf("    - Additional Context: %s", config.OpsGenie.AdditionalContext)
-			}
-		}
-	}
+	log.Printf("✅ Configuration validation completed for %s", loader.absolutePath)
+	logConfigSummary(&config)
 
 	return &config, nil
+}
+
+// validateOpsGenieConfigWithLineNumbers valida la configuración de OpsGenie con números de línea
+func validateOpsGenieConfigWithLineNumbers(config *OpsGenieConfig, defaults *OpsGenieConfig, loader *TOMLConfigLoader) {
+	if config.Region == "" {
+		loader.validateAndLog("opsgenie.region", config.Region, "string", false,
+			fmt.Sprintf("Empty region. Using default: %s", defaults.Region))
+		config.Region = defaults.Region
+	} else {
+		loader.validateAndLog("opsgenie.region", config.Region, "string", true, "")
+	}
+
+	if config.Priority == "" {
+		config.Priority = defaults.Priority
+	}
+
+	if config.Source == "" {
+		config.Source = defaults.Source
+	}
+
+	if len(config.Tags) == 0 {
+		loader.validateAndLog("opsgenie.tags", config.Tags, "[]string", false,
+			"No tags specified. Using defaults.")
+		config.Tags = defaults.Tags
+	} else {
+		loader.validateAndLog("opsgenie.tags", len(config.Tags), "[]string", true,
+			fmt.Sprintf("%d tags configured", len(config.Tags)))
+	}
+
+	// Validate team
+	if config.Team == "" {
+		loader.validateAndLog("opsgenie.team", config.Team, "string", false,
+			"Team name is required for proper alert routing")
+	} else {
+		loader.validateAndLog("opsgenie.team", config.Team, "string", true, "")
+	}
+
+	// Validate mandatory field defaults
+	if config.Business == "" {
+		config.Business = defaults.Business
+	}
+
+	// Validate priority format
+	validPriorities := map[string]bool{"P1": true, "P2": true, "P3": true, "P4": true, "P5": true}
+	if !validPriorities[config.Priority] {
+		loader.validateAndLog("opsgenie.priority", config.Priority, "string (P1-P5)", false,
+			fmt.Sprintf("Invalid priority. Using default: %s", defaults.Priority))
+		config.Priority = defaults.Priority
+	} else {
+		loader.validateAndLog("opsgenie.priority", config.Priority, "string", true, "")
+	}
+
+	// Validate region
+	validRegions := map[string]bool{"us": true, "eu": true}
+	if !validRegions[config.Region] {
+		loader.validateAndLog("opsgenie.region", config.Region, "string (us|eu)", false,
+			fmt.Sprintf("Invalid region. Using default: %s", defaults.Region))
+		config.Region = defaults.Region
+	}
+
+	// Validate cooldown
+	if config.AlertCooldownSeconds <= 0 {
+		config.AlertCooldownSeconds = defaults.AlertCooldownSeconds
+	}
+}
+
+// logConfigSummary muestra un resumen final de la configuración cargada
+func logConfigSummary(config *Config) {
+	log.Printf("📋 Configuration Summary:")
+	log.Printf("   Circuit Breaker:")
+	log.Printf("     - Memory threshold: %.2f%%", config.MemoryThreshold)
+	log.Printf("     - Latency threshold: %dms", config.LatencyThreshold)
+	log.Printf("     - Latency window size: %d", config.LatencyWindowSize)
+	log.Printf("     - Percentile: %.2f", config.Percentile)
+	log.Printf("     - Wait time: %ds", config.WaitTime)
+	log.Printf("     - Trend analysis: %t", config.TrendAnalysisEnabled)
+
+	if config.OpsGenie != nil {
+		log.Printf("   OpsGenie:")
+		log.Printf("     - Enabled: %t", config.OpsGenie.Enabled)
+		if config.OpsGenie.Enabled {
+			log.Printf("     - Team: %s", config.OpsGenie.Team)
+			log.Printf("     - Environment: %s", config.OpsGenie.Environment)
+			log.Printf("     - BookmakerID: %s", config.OpsGenie.BookmakerID)
+			log.Printf("     - Business: %s", config.OpsGenie.Business)
+			log.Printf("     - Tags: %v", config.OpsGenie.Tags)
+		}
+	}
 }
 
 // validateAndSetOpsGenieDefaults validates OpsGenie configuration and sets defaults
@@ -530,7 +731,6 @@ func GetConfigSummary(config *Config) map[string]interface{} {
 			"business":               config.OpsGenie.Business,
 			"additional_context":     config.OpsGenie.AdditionalContext,
 			"alert_cooldown_seconds": config.OpsGenie.AlertCooldownSeconds,
-			"use_environments":       config.OpsGenie.UseEnvironments,
 		}
 		summary["opsgenie"] = opsGenieSummary
 	}

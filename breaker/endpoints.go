@@ -465,25 +465,24 @@ func (b *BreakerAPI) GetBreakerStatus(ctx *gin.Context) {
 
 // OpsGenieStatusResponse represents the current configuration and status of OpsGenie integration
 type OpsGenieStatusResponse struct {
-	Enabled               bool                    `json:"enabled"`
-	APIKey                string                  `json:"api_key,omitempty"`
-	Region                string                  `json:"region"`
-	Priority              string                  `json:"priority"`
-	Source                string                  `json:"source"`
-	Team                  string                  `json:"team"`
-	Tags                  []string                `json:"tags"`
-	TriggerOnOpen         bool                    `json:"trigger_on_breaker_open"`
-	TriggerOnReset        bool                    `json:"trigger_on_breaker_reset"`
-	TriggerOnMemory       bool                    `json:"trigger_on_memory_threshold"`
-	TriggerOnLatency      bool                    `json:"trigger_on_latency_threshold"`
-	IncludeLatencyMetrics bool                    `json:"include_latency_metrics"`
-	IncludeMemoryMetrics  bool                    `json:"include_memory_metrics"`
-	IncludeSystemInfo     bool                    `json:"include_system_info"`
-	AlertCooldownSeconds  int                     `json:"alert_cooldown_seconds"`
-	UseEnvironments       bool                    `json:"use_environments"`
-	CurrentEnvironment    string                  `json:"current_environment,omitempty"`
-	EnvironmentSettings   map[string]EnvOpsConfig `json:"environment_settings,omitempty"`
-	Initialized           bool                    `json:"initialized"`
+	Enabled               bool     `json:"enabled"`
+	APIKey                string   `json:"api_key,omitempty"`
+	Region                string   `json:"region"`
+	Priority              string   `json:"priority"`
+	Source                string   `json:"source"`
+	Team                  string   `json:"team"`
+	Tags                  []string `json:"tags"`
+	TriggerOnOpen         bool     `json:"trigger_on_breaker_open"`
+	TriggerOnReset        bool     `json:"trigger_on_breaker_reset"`
+	TriggerOnMemory       bool     `json:"trigger_on_memory_threshold"`
+	TriggerOnLatency      bool     `json:"trigger_on_latency_threshold"`
+	IncludeLatencyMetrics bool     `json:"include_latency_metrics"`
+	IncludeMemoryMetrics  bool     `json:"include_memory_metrics"`
+	IncludeSystemInfo     bool     `json:"include_system_info"`
+	AlertCooldownSeconds  int      `json:"alert_cooldown_seconds"`
+	UseEnvironments       bool     `json:"use_environments"`
+	CurrentEnvironment    string   `json:"current_environment,omitempty"`
+	Initialized           bool     `json:"initialized"`
 }
 
 // OpsGenieToggleRequest represents a request to enable or disable OpsGenie
@@ -538,19 +537,12 @@ func (b *BreakerAPI) GetOpsGenieStatus(ctx *gin.Context) {
 		IncludeMemoryMetrics:  b.Config.OpsGenie.IncludeMemoryMetrics,
 		IncludeSystemInfo:     b.Config.OpsGenie.IncludeSystemInfo,
 		AlertCooldownSeconds:  b.Config.OpsGenie.AlertCooldownSeconds,
-		UseEnvironments:       b.Config.OpsGenie.UseEnvironments,
 		Initialized:           opsgenieClient.IsInitialized(),
 	}
 
 	// Only include API key hint if it's set (don't show the actual key for security)
 	if b.Config.OpsGenie.APIKey != "" {
 		response.APIKey = "********" // Mask the actual key
-	}
-
-	// Include environment information if enabled
-	if b.Config.OpsGenie.UseEnvironments {
-		response.CurrentEnvironment = string(opsgenieClient.environment)
-		response.EnvironmentSettings = b.Config.OpsGenie.EnvironmentSettings
 	}
 
 	ctx.JSON(http.StatusOK, response)

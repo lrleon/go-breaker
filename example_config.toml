@@ -50,10 +50,10 @@ region = "us"
 source = "go-breaker"
 
 # Tags to include with alerts for filtering and organization
-tags = ["production", "api", "circuit-breaker"]
+tags = ["Environment: production", "API: Basketball", "Component: circuit-breaker"]
 
 # OpsGenie team to route alerts to
-team = "platform-team"
+team = "Sports Models APIs"
 
 # Priority level for alerts (P1-P5, where P1 is highest)
 priority = "P2"
@@ -83,27 +83,6 @@ include_system_info = true
 # Prevents alert storms during ongoing issues
 alert_cooldown_seconds = 300
 
-# Whether to use environment-specific settings
-use_environments = true
-
-# Environment-specific OpsGenie settings
-# This allows different alert configurations based on the environment
-[opsgenie.environment_settings]
-  # Development environment
-  [opsgenie.environment_settings.dev]
-  enabled = false
-  priority = "P5"
-  
-  # UAT/Staging environment
-  [opsgenie.environment_settings.uat]
-  enabled = true
-  priority = "P3"
-  
-  # Production environment
-  [opsgenie.environment_settings.production]
-  enabled = true
-  priority = "P2"
-
 #==============================================================================
 # API INFORMATION (INCLUDED IN ALERTS)
 #==============================================================================
@@ -118,7 +97,6 @@ api_owner = "Payments Team"
 api_priority = "critical"
 api_dependencies = ["database", "auth-service", "notification-service"]
 api_endpoints = ["/payments", "/refunds", "/transactions"]
-api_custom_attributes = { service_tier = "premium", business_impact = "high" }
 
 #==============================================================================
 # USAGE TIPS AND RECOMMENDED PRACTICES

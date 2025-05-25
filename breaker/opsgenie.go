@@ -91,16 +91,10 @@ func NewOpsGenieClient(config *OpsGenieConfig) *OpsGenieClient {
 		config = &OpsGenieConfig{Enabled: false}
 	}
 
-	var env Environment
-	if config.UseEnvironments {
-		env = determineEnvironment()
-	}
-
 	return &OpsGenieClient{
 		config:        config,
 		lastAlertTime: make(map[string]time.Time),
 		alertSent:     make(map[string]bool),
-		environment:   env,
 	}
 }
 
@@ -379,15 +373,11 @@ func (o *OpsGenieClient) Initialize() error {
 		log.Printf("Alerts will be sent with fallback values. Please configure missing fields.")
 	}
 
+	o.validateTagsConfiguration()
+
 	// Log current mandatory fields status
 	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
 	log.Printf("OpsGenie initialized with mandatory fields: %+v", mandatoryFields)
-
-	// Check if alerts are enabled for the current environment
-	if !o.isEnabledForEnvironment() {
-		log.Printf("OpsGenie integration is disabled for environment: %s", o.environment)
-		return nil
-	}
 
 	// First check for API key in environment variables
 	apiKey := os.Getenv(EnvOpsGenieAPIKey)
@@ -443,56 +433,13 @@ func (o *OpsGenieClient) Initialize() error {
 	return nil
 }
 
-// isEnabledForEnvironment checks if OpsGenie is enabled for the current environment
-func (o *OpsGenieClient) isEnabledForEnvironment() bool {
-	if o == nil || o.config == nil {
-		return false
-	}
-
-	if !o.config.UseEnvironments {
-		return o.config.Enabled
-	}
-
-	if o.config.EnvironmentSettings != nil {
-		if envConfig, exists := o.config.EnvironmentSettings[string(o.environment)]; exists {
-			return envConfig.Enabled
-		}
-	}
-
-	return o.config.Enabled
-}
-
 // getPriorityForEnvironment returns the appropriate priority for the current environment
 func (o *OpsGenieClient) getPriorityForEnvironment() alert.Priority {
 	if o == nil || o.config == nil {
 		return alert.P3
 	}
 
-	var priorityStr string
-	if !o.config.UseEnvironments {
-		priorityStr = o.config.Priority
-	} else {
-		if o.config.EnvironmentSettings != nil {
-			if envConfig, exists := o.config.EnvironmentSettings[string(o.environment)]; exists && envConfig.Priority != "" {
-				priorityStr = envConfig.Priority
-			}
-		}
-
-		if priorityStr == "" && o.config.Priority != "" {
-			priorityStr = o.config.Priority
-		}
-
-		if priorityStr == "" {
-			switch o.environment {
-			case EnvProduction:
-				priorityStr = "P1"
-			case EnvUAT:
-				priorityStr = "P3"
-			default:
-				priorityStr = "P5"
-			}
-		}
-	}
+	var priorityStr = o.config.Priority
 
 	if priorityStr == "" {
 		priorityStr = "P3"
@@ -627,40 +574,100 @@ func (o *OpsGenieClient) getAPIIdentifier() string {
 	return o.config.Source
 }
 
-// buildEnhancedTags creates comprehensive tags including mandatory field values
-func (o *OpsGenieClient) buildEnhancedTags(alertType string) []string {
-	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
+// En opsgenie.go, modificar la función buildEnhancedTags
 
-	// Start with existing tags
-	tags := make([]string, len(o.config.Tags))
-	copy(tags, o.config.Tags)
+// processAndValidateTags procesa las tags simples y marca las que no tienen formato key:value
+func (o *OpsGenieClient) processAndValidateTags(alertType string) []string {
+	var processedTags []string
 
-	// Add mandatory field tags
-	tags = append(tags,
-		fmt.Sprintf("env:%s", strings.ToLower(mandatoryFields["Environment"])),
-		fmt.Sprintf("environment:%s", strings.ToLower(mandatoryFields["Environment"])), // Full environment tag
-		fmt.Sprintf("bookmaker:%s", mandatoryFields["BookmakerId"]),
-		fmt.Sprintf("host:%s", mandatoryFields["Host"]),
-		fmt.Sprintf("business:%s", mandatoryFields["Business"]),
-		fmt.Sprintf("team:%s", mandatoryFields["Team"]),
-		fmt.Sprintf("alert-type:%s", alertType),
-	)
-
-	// Add additional context tag if provided
-	if additionalContext := mandatoryFields["AdditionalContext"]; additionalContext != "" {
-		tags = append(tags, fmt.Sprintf("context:%s", additionalContext))
+	// Procesar tags de configuración
+	for _, tag := range o.config.Tags {
+		processedTag := o.processTag(tag)
+		processedTags = append(processedTags, processedTag)
 	}
 
-	// Add service-specific tags
+	// Agregar tags automáticas del sistema
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
+
+	systemTags := []string{
+		fmt.Sprintf("Environment:%s", strings.ToLower(mandatoryFields["Environment"])),
+		fmt.Sprintf("BookmakerId:%s", mandatoryFields["BookmakerId"]),
+		fmt.Sprintf("Host:%s", mandatoryFields["Host"]),
+		fmt.Sprintf("Business:%s", mandatoryFields["Business"]),
+		fmt.Sprintf("Team:%s", mandatoryFields["Team"]),
+		fmt.Sprintf("AlertType:%s", alertType),
+	}
+
+	// Agregar tags del sistema
+	processedTags = append(processedTags, systemTags...)
+
+	// Agregar tags específicas del servicio si están disponibles
 	if o.config.APIName != "" {
-		tags = append(tags, fmt.Sprintf("service:%s", o.config.APIName))
+		processedTags = append(processedTags, fmt.Sprintf("Service:%s", o.config.APIName))
 	}
 
 	if o.config.ServiceTier != "" {
-		tags = append(tags, fmt.Sprintf("tier:%s", o.config.ServiceTier))
+		processedTags = append(processedTags, fmt.Sprintf("Tier:%s", o.config.ServiceTier))
 	}
 
-	return tags
+	// Agregar context adicional si está disponible
+	if additionalContext := o.getAdditionalContext(); additionalContext != "" {
+		processedTags = append(processedTags, fmt.Sprintf("Context:%s", additionalContext))
+	}
+
+	return processedTags
+}
+
+// processTag procesa una tag individual y la marca si no tiene formato key:value
+func (o *OpsGenieClient) processTag(tag string) string {
+	// Verificar si la tag tiene formato "key:value"
+	if strings.Contains(tag, ":") {
+		parts := strings.SplitN(tag, ":", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
+			// Tag válida con formato key:value
+			return tag
+		}
+	}
+
+	// Tag sin formato key:value - marcarla claramente
+	return fmt.Sprintf("**TAG_KEY_UNDEFINED**:%s", tag)
+}
+
+// buildEnhancedTags - versión simplificada que usa el nuevo sistema
+func (o *OpsGenieClient) buildEnhancedTags(alertType string) []string {
+	return o.processAndValidateTags(alertType)
+}
+
+// validateTagsConfiguration valida la configuración de tags y muestra advertencias
+func (o *OpsGenieClient) validateTagsConfiguration() {
+	if o == nil || o.config == nil {
+		return
+	}
+
+	var undefinedTags []string
+	var validTags []string
+
+	for _, tag := range o.config.Tags {
+		if strings.Contains(tag, ":") {
+			parts := strings.SplitN(tag, ":", 2)
+			if len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
+				validTags = append(validTags, tag)
+			} else {
+				undefinedTags = append(undefinedTags, tag)
+			}
+		} else {
+			undefinedTags = append(undefinedTags, tag)
+		}
+	}
+
+	if len(validTags) > 0 {
+		log.Printf("✅ Valid key:value tags: %v", validTags)
+	}
+
+	if len(undefinedTags) > 0 {
+		log.Printf("⚠️  Tags without key:value format (will be marked as **TAG_KEY_UNDEFINED**): %v", undefinedTags)
+		log.Printf("💡 Consider using format like 'Component:circuit-breaker' instead of just 'circuit-breaker'")
+	}
 }
 
 // buildEnhancedDetails creates comprehensive details map with mandatory and optional fields
@@ -694,11 +701,6 @@ func (o *OpsGenieClient) buildEnhancedDetails(alertType string, specificDetails 
 	// Add specific alert details
 	for key, value := range specificDetails {
 		details[key] = value
-	}
-
-	// Add custom attributes
-	for key, value := range o.config.APICustomAttributes {
-		details[fmt.Sprintf("Custom_%s", key)] = value
 	}
 
 	return details
@@ -862,7 +864,7 @@ func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, wait
 		return nil
 	}
 
-	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+	if !o.IsInitialized() {
 		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
 		return nil
 	}
@@ -929,7 +931,7 @@ func (o *OpsGenieClient) SendBreakerResetAlert() error {
 		return nil
 	}
 
-	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+	if !o.IsInitialized() {
 		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
 		return nil
 	}
@@ -985,7 +987,7 @@ func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) er
 		return nil
 	}
 
-	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+	if !o.IsInitialized() {
 		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
 		return nil
 	}
@@ -1048,7 +1050,7 @@ func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64, thresholdMs in
 		return nil
 	}
 
-	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+	if !o.IsInitialized() {
 		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
 		return nil
 	}
