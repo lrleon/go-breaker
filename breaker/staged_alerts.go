@@ -90,6 +90,10 @@ func (sam *StagedAlertManager) OnBreakerTriggered(context *AlertContext, breaker
 
 	// Send an initial low-priority alert
 	go sam.sendInitialAlert(pending)
+
+	//Completely clean the internal state
+	sam.pendingAlerts = make(map[string]*PendingAlert)
+	log.Printf("✅ Internal monitor state cleared")
 }
 
 // sendInitialAlert sends the initial low-priority alert
