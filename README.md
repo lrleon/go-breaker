@@ -285,6 +285,9 @@ escalated_alert_priority = "P1"      # High priority for escalated alert
 | `/breaker/enabled` | POST | Enable the breaker |
 | `/breaker/disabled` | POST | Disable the breaker |
 | `/breaker/reset` | POST | Reset the breaker |
+| `/breaker/trigger-by-memory` | GET | Manually trigger breaker by memory threshold |
+| `/breaker/trigger-by-latency` | GET | Manually trigger breaker by latency threshold |
+| `/breaker/restore-memory-check` | GET | Restore normal memory checking after manual trigger |
 
 ### Configuration
 
@@ -342,6 +345,46 @@ Comprehensive logging with:
 - **Structured logging** - Consistent format and metadata
 - **Null-safe operations** - Safe to use with nil loggers
 - **Performance optimized** - Minimal overhead in production
+
+### Manual Trigger Endpoints
+
+For testing and debugging purposes, you can manually trigger the circuit breaker:
+
+#### Memory Trigger
+```bash
+# Trigger by memory threshold breach
+curl http://localhost:8080/breaker/trigger-by-memory
+
+# Check status (should show breaker blocking requests)
+curl http://localhost:8080/breaker/status
+
+# Restore normal memory checking
+curl http://localhost:8080/breaker/restore-memory-check
+```
+
+#### Latency Trigger
+```bash
+# Trigger by latency threshold breach
+curl http://localhost:8080/breaker/trigger-by-latency
+
+# Check status (should show breaker triggered)
+curl http://localhost:8080/breaker/status
+
+# Auto-restoration: Make normal requests or wait for timeout
+curl http://localhost:8080/test  # Multiple times with normal latency
+
+# Or manual reset
+curl -X POST http://localhost:8080/breaker/reset -d '{"confirm": true}'
+```
+
+#### Restoration Behavior
+
+| Trigger Type | Auto-Restore? | How to Restore |
+|--------------|---------------|----------------|
+| **Memory** | ❌ No | Use `/breaker/restore-memory-check` or `/breaker/reset` |
+| **Latency** | ✅ Yes | Normal requests + wait time, or `/breaker/reset` |
+
+**Memory triggers** use a persistent override that requires explicit restoration, while **latency triggers** inject artificial measurements that naturally age out of the sliding window.
 
 ## Examples
 

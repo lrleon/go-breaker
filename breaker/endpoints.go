@@ -806,6 +806,10 @@ func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 		breakerGroup.GET("/memory-limit", breakerAPI.GetMemoryLimit)
 		breakerGroup.POST("/reset", breakerAPI.Reset)
 
+		breakerGroup.GET("/trigger-by-memory", breakerAPI.TriggerBreakerByMemory)
+		breakerGroup.GET("/trigger-by-latency", breakerAPI.TriggerBreakerByLatency)
+		breakerGroup.GET("/restore-memory-check", breakerAPI.RestoreMemoryCheck)
+
 		breakerGroup.GET("/staged-alerts", breakerAPI.GetStagedAlertStatus)
 
 		// New OpsGenie endpoints
@@ -875,4 +879,112 @@ func (b *BreakerAPI) GetStagedAlertStatus(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, response)
+}
+
+// TriggerBreakerByMemory forces the circuit breaker to open by simulating a memory threshold breach
+func (b *BreakerAPI) TriggerBreakerByMemory(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	// Get the current breaker driver
+	driver, ok := b.Driver.(*BreakerDriver)
+	if !ok {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Unable to access breaker driver",
+		})
+		return
+	}
+
+	// Force memory check to fail to trigger the breaker
+	SetMemoryOK(driver, false)
+
+	// Make the breaker check its status by calling Allow() which will trigger it
+	allowed := b.Driver.Allow()
+
+	// Log the action
+	log.Printf("Circuit breaker manually triggered by memory threshold breach via API")
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message":   "Circuit breaker triggered by memory threshold breach",
+		"triggered": !allowed,
+		"reason":    "manual_memory_trigger",
+		"note":      "Use /breaker/restore-memory-check to restore normal memory checking",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// TriggerBreakerByLatency forces the circuit breaker to open by adding high latency measurements
+func (b *BreakerAPI) TriggerBreakerByLatency(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	// Get the current breaker driver
+	_, ok := b.Driver.(*BreakerDriver)
+	if !ok {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Unable to access breaker driver",
+		})
+		return
+	}
+
+	// Add multiple high latency measurements to trigger the breaker
+	now := time.Now()
+	triggerLatency := b.Config.LatencyThreshold + 500 // Add 500ms above threshold
+
+	// Add enough measurements to ensure the percentile goes above threshold
+	windowSize := b.Config.LatencyWindowSize
+	if windowSize < 10 {
+		windowSize = 10 // Minimum to ensure triggering
+	}
+
+	for i := 0; i < windowSize; i++ {
+		// Create artificial latency measurements
+		startTime := now.Add(time.Duration(i)*time.Second - time.Duration(triggerLatency)*time.Millisecond)
+		endTime := now.Add(time.Duration(i) * time.Second)
+		b.Driver.Done(startTime, endTime)
+	}
+
+	// Check if the breaker was triggered
+	triggered := b.Driver.TriggeredByLatencies()
+
+	// Log the action
+	log.Printf("Circuit breaker manually triggered by latency threshold breach via API")
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message":            "Circuit breaker triggered by latency threshold breach",
+		"triggered":          triggered,
+		"reason":             "manual_latency_trigger",
+		"latency_used":       triggerLatency,
+		"measurements_added": windowSize,
+		"note":               "Will auto-restore after normal requests and wait time, or use /breaker/reset",
+		"timestamp":          time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// RestoreMemoryCheck restores normal memory checking behavior after manual trigger
+func (b *BreakerAPI) RestoreMemoryCheck(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	// Get the current breaker driver
+	driver, ok := b.Driver.(*BreakerDriver)
+	if !ok {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Unable to access breaker driver",
+		})
+		return
+	}
+
+	// Restore normal memory checking
+	SetMemoryOK(driver, true)
+
+	// Log the action
+	log.Printf("Memory check restored to normal behavior via API")
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message":   "Memory check restored to normal behavior",
+		"action":    "memory_check_restored",
+		"note":      "Circuit breaker will now use actual memory usage for decisions",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
 }
