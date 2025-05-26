@@ -310,18 +310,20 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 		// Send OpsGenie alert for breaker triggered
 		if b.opsGenieClient != nil && b.config.OpsGenie != nil && b.config.OpsGenie.Enabled {
 			if b.stagedAlertManager != nil {
-				// Use staged alerting system
-				context := &AlertContext{TriggerTime: time.Now(),
+				// Use staggered alert system
+				context := &AlertContext{
+					TriggerTime:     time.Now(),
 					PeakLatency:     latencyPercentile,
-					AverageLatency:  latencyPercentile,
-					TriggerReason:   b.determineTriggerReason(memoryStatus, latencyAboveThreshold),
+					AverageLatency:  latencyPercentile, // Simplificado - puedes calcular promedio real
+					TriggerReason:   triggerReason,
 					MemoryUsage:     b.getMemoryUsagePercent(),
-					RecentLatencies: []int64{latencyPercentile}, // Simple array
+					RecentLatencies: b.latencyWindow.GetRecentLatencies(),
 					WaitTime:        b.config.WaitTime,
-					TimeBeforeAlert: b.config.OpsGenie.TimeBeforeSendAlert}
+					TimeBeforeAlert: b.config.OpsGenie.TimeBeforeSendAlert,
+				}
 				go b.stagedAlertManager.OnBreakerTriggered(context, b)
 			} else {
-				// Use original immediate alerting system
+				// Use original immediate alert system
 				go func() {
 					if err := b.opsGenieClient.SendBreakerOpenAlert(latencyPercentile, memoryStatus, b.config.WaitTime); err != nil {
 						b.logger.Logf("Failed to send OpsGenie alert for breaker open: %v", err)
@@ -368,6 +370,10 @@ func (b *BreakerDriver) Reset() {
 			}
 		}()
 	}
+
+	if b.stagedAlertManager != nil {
+		go b.stagedAlertManager.OnBreakerRecovered()
+	}
 }
 
 // LatencyOK reports whether the current latency percentile is below the configured threshold
@@ -387,7 +393,7 @@ func (b *BreakerDriver) GetConfigFile() string {
 	return b.configFile
 }
 
-// determineTriggerReason determina la razón del disparo
+// determineTriggerReason Determine the reason for the tripping
 func (b *BreakerDriver) determineTriggerReason(memoryOK bool, latencyAboveThreshold bool) string {
 	if !memoryOK && latencyAboveThreshold {
 		return "memory_and_latency"
@@ -399,7 +405,7 @@ func (b *BreakerDriver) determineTriggerReason(memoryOK bool, latencyAboveThresh
 	return "circuit_breaker_triggered"
 }
 
-// getMemoryUsagePercent calcula el porcentaje de uso de memoria
+// getMemoryUsagePercent Calculate the percentage of memory use
 func (b *BreakerDriver) getMemoryUsagePercent() float64 {
 	if MemoryLimit <= 0 {
 		return 0.0
@@ -408,4 +414,24 @@ func (b *BreakerDriver) getMemoryUsagePercent() float64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	return float64(m.Alloc) / float64(MemoryLimit) * 100.0
+}
+
+func (b *BreakerDriver) GetStagedAlertInfo() map[string]interface{} {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	info := map[string]interface{}{
+		"staged_alerting_enabled": b.stagedAlertManager != nil,
+		"time_before_alert":       0,
+		"pending_alerts_count":    0,
+		"pending_alerts_info":     map[string]interface{}{},
+	}
+
+	if b.stagedAlertManager != nil {
+		info["time_before_alert"] = b.config.OpsGenie.TimeBeforeSendAlert
+		info["pending_alerts_count"] = b.stagedAlertManager.GetPendingAlertsCount()
+		info["pending_alerts_info"] = b.stagedAlertManager.GetPendingAlertsInfo()
+	}
+
+	return info
 }

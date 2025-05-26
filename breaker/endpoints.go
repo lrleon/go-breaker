@@ -395,6 +395,16 @@ type BreakerStatus struct {
 	HasPositiveTrend            bool `json:"has_positive_trend"`
 }
 
+// StagedAlertInfo Represents information about the stepped alert system
+type StagedAlertInfo struct {
+	Enabled            bool                              `json:"enabled"`
+	TimeBeforeAlert    int                               `json:"time_before_alert_seconds"`
+	InitialPriority    string                            `json:"initial_priority"`
+	EscalatedPriority  string                            `json:"escalated_priority"`
+	PendingAlertsCount int                               `json:"pending_alerts_count"`
+	PendingAlerts      map[string]map[string]interface{} `json:"pending_alerts,omitempty"`
+}
+
 // GetBreakerStatus returns detailed information about the current state of the circuit breaker
 func (b *BreakerAPI) GetBreakerStatus(ctx *gin.Context) {
 	b.lock.Lock()
@@ -431,6 +441,28 @@ func (b *BreakerAPI) GetBreakerStatus(ctx *gin.Context) {
 	hasPositiveTrend := false
 	if len(recentLatencies) >= driver.config.TrendAnalysisMinSampleCount {
 		hasPositiveTrend = driver.latencyWindow.HasPositiveTrend(driver.config.TrendAnalysisMinSampleCount)
+	}
+
+	// Get staged alert information
+	stagedAlertInfo := StagedAlertInfo{
+		Enabled:            driver.stagedAlertManager != nil,
+		TimeBeforeAlert:    0,
+		InitialPriority:    "",
+		EscalatedPriority:  "",
+		PendingAlertsCount: 0,
+		PendingAlerts:      make(map[string]map[string]interface{}),
+	}
+
+	if driver.stagedAlertManager != nil && driver.config.OpsGenie != nil {
+		stagedAlertInfo.TimeBeforeAlert = driver.config.OpsGenie.TimeBeforeSendAlert
+		stagedAlertInfo.InitialPriority = driver.config.OpsGenie.InitialAlertPriority
+		stagedAlertInfo.EscalatedPriority = driver.config.OpsGenie.EscalatedAlertPriority
+		stagedAlertInfo.PendingAlertsCount = driver.stagedAlertManager.GetPendingAlertsCount()
+
+		// Just include outstanding alert details if any
+		if stagedAlertInfo.PendingAlertsCount > 0 {
+			stagedAlertInfo.PendingAlerts = driver.stagedAlertManager.GetPendingAlertsInfo()
+		}
 	}
 
 	// Prepare the status object
@@ -774,6 +806,8 @@ func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 		breakerGroup.GET("/memory-limit", breakerAPI.GetMemoryLimit)
 		breakerGroup.POST("/reset", breakerAPI.Reset)
 
+		breakerGroup.GET("/staged-alerts", breakerAPI.GetStagedAlertStatus)
+
 		// New OpsGenie endpoints
 		opsgenieGroup := breakerGroup.Group("/opsgenie")
 		{
@@ -797,4 +831,48 @@ func TotalMemoryMB() int64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	return int64(m.Sys / (1024 * 1024))
+}
+
+func (b *BreakerAPI) GetStagedAlertStatus(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	driver, ok := b.Driver.(*BreakerDriver)
+	if !ok {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Staged alerting not available",
+		})
+		return
+	}
+
+	if driver.stagedAlertManager == nil {
+		ctx.JSON(http.StatusOK, gin.H{
+			"enabled": false,
+			"message": "Staged alerting is not configured",
+		})
+		return
+	}
+
+	if b.Config.OpsGenie == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "OpsGenie configuration not available",
+		})
+		return
+	}
+
+	pendingCount := driver.stagedAlertManager.GetPendingAlertsCount()
+	pendingInfo := driver.stagedAlertManager.GetPendingAlertsInfo() // Este retorna el tipo correcto
+
+	response := gin.H{
+		"enabled":              true,
+		"time_before_alert":    b.Config.OpsGenie.TimeBeforeSendAlert,
+		"initial_priority":     b.Config.OpsGenie.InitialAlertPriority,
+		"escalated_priority":   b.Config.OpsGenie.EscalatedAlertPriority,
+		"pending_alerts_count": pendingCount,
+		"pending_alerts":       pendingInfo, // Sin cambio de tipo necesario aquí
+		"opsgenie_enabled":     b.Config.OpsGenie.Enabled,
+		"trigger_on_open":      b.Config.OpsGenie.TriggerOnOpen,
+	}
+
+	ctx.JSON(http.StatusOK, response)
 }
