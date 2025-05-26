@@ -2,29 +2,29 @@
 
 # Leandro script for debugging. DO NOT USE (it is in spanish lol!)
 
-# Script para mantener el circuit breaker activo CONTINUAMENTE
+# Script to keep the circuit breaker CONTINUOUSLY active
 SERVER_URL="http://localhost:8080"
 
-echo "🔄 MANTENIENDO CIRCUIT BREAKER ACTIVO CONTINUAMENTE"
+echo "🔄 KEEPING CIRCUIT BREAKER CONTINUOUSLY ACTIVE"
 echo "=================================================="
 
-# Configurar condiciones extremas
-echo "1. Configurando condiciones extremas..."
+# Configure extreme conditions
+echo "1. Configuring extreme conditions..."
 curl -s -X POST $SERVER_URL/breaker/latency -d '{"threshold": 100}' > /dev/null
 curl -s -X POST $SERVER_URL/breaker/percentile -d '{"percentile": 80}' > /dev/null
-curl -s -X POST $SERVER_URL/breaker/wait -d '{"wait_time": 8}' > /dev/null  # Tiempo largo antes de reset
+curl -s -X POST $SERVER_URL/breaker/wait -d '{"wait_time": 8}' > /dev/null  # Long time before reset
 curl -s -X POST $SERVER_URL/breaker/opsgenie/cooldown -d '{"cooldown_seconds": 1}' > /dev/null
-echo "✅ Configurado: threshold=100ms, percentile=80%, wait=8s"
+echo "✅ Configured: threshold=100ms, percentile=80%, wait=8s"
 
-# Reiniciar
-echo "2. Reiniciando..."
+# Reset
+echo "2. Resetting..."
 curl -s -X POST $SERVER_URL/breaker/reset -d '{"confirm": true}' > /dev/null
 curl -s -X POST $SERVER_URL/test/trigger -d '{"scenario": "high_latency"}' > /dev/null
-echo "✅ Estado limpio y alta latencia activada"
+echo "✅ Clean state and high latency activated"
 
-echo "3. Bombardeo continuo para activar y mantener el breaker..."
+echo "3. Continuous bombardment to activate and maintain the breaker..."
 
-# Función para hacer request y reportar
+# Function to make request and report
 make_request() {
     local i=$1
     response=$(curl -s $SERVER_URL/test)
@@ -34,14 +34,14 @@ make_request() {
     echo $triggered
 }
 
-# Bombardeo inicial hasta activar
-echo "Fase 1: Activando el breaker..."
+# Initial bombardment until activation
+echo "Phase 1: Activating the breaker..."
 breaker_activated=false
 for i in {1..30}; do
     triggered=$(make_request $i)
 
     if [ "$triggered" = "true" ]; then
-        echo "🎯 ¡Breaker activado en request $i!"
+        echo "🎯 Breaker activated on request $i!"
         breaker_activated=true
         break
     fi
@@ -49,14 +49,14 @@ for i in {1..30}; do
 done
 
 if [ "$breaker_activated" = "false" ]; then
-    echo "❌ No se pudo activar el breaker"
+    echo "❌ Could not activate the breaker"
     exit 1
 fi
 
 echo ""
-echo "Fase 2: Manteniendo el breaker activo con requests continuos..."
+echo "Phase 2: Keeping the breaker active with continuous requests..."
 
-# Función que hace requests continuos en background
+# Function that makes continuous requests in background
 continuous_requests() {
     local counter=1
     while true; do
@@ -64,53 +64,53 @@ continuous_requests() {
         printf "."
         sleep 0.5
         counter=$((counter + 1))
-        if [ $counter -gt 200 ]; then  # Max 100 segundos
+        if [ $counter -gt 200 ]; then  # Max 100 seconds
             break
         fi
     done
 }
 
-# Iniciar requests continuos en background
+# Start continuous requests in background
 continuous_requests &
 BACKGROUND_PID=$!
 
-# Monitorear estado cada 2 segundos
-echo "Monitoreando estado (requests continuos en background)..."
-for check in {1..50}; do  # 50 checks = ~100 segundos
+# Monitor status every 2 seconds
+echo "Monitoring status (continuous requests in background)..."
+for check in {1..50}; do  # 50 checks = ~100 seconds
     printf "\nCheck %2d: " $check
 
-    # Verificar estado del breaker
+    # Verify breaker status
     status=$(curl -s $SERVER_URL/breaker/status)
     current_triggered=$(echo $status | jq -r '.triggered')
     current_latency=$(echo $status | jq -r '.current_percentile_ms')
 
-    # Verificar alertas pendientes
+    # Verify pending alerts
     staged=$(curl -s $SERVER_URL/breaker/staged-alerts)
     pending_count=$(echo $staged | jq -r '.pending_alerts_count')
 
     printf "triggered=%s, latency=%sms, pending=%s" $current_triggered $current_latency $pending_count
 
-    # Si tenemos alertas pendientes, ¡éxito!
+    # If we have pending alerts, success!
     if [ "$pending_count" != "0" ] && [ "$pending_count" != "null" ]; then
         echo ""
-        echo "🎉 ¡ÉXITO! Tenemos alertas pendientes:"
+        echo "🎉 SUCCESS! We have pending alerts:"
         echo $staged | jq '.'
 
         echo ""
-        echo "⏰ Ahora esperaremos 70 segundos para ver la escalación..."
-        echo "   (manteniendo requests activos)"
+        echo "⏰ Now we'll wait 70 seconds to see the escalation..."
+        echo "   (keeping requests active)"
 
-        # Esperar escalación mientras mantenemos requests
-        for escalation_check in {1..35}; do  # 35 * 2 = 70 segundos
+        # Wait for escalation while maintaining requests
+        for escalation_check in {1..35}; do  # 35 * 2 = 70 seconds
             printf "Escalation wait %2d/35..." $escalation_check
 
-            # Verificar si ya escaló
+            # Check if already escalated
             escalation_status=$(curl -s $SERVER_URL/breaker/staged-alerts)
             escalated_count=$(echo $escalation_status | jq -r '.pending_alerts | to_entries | map(select(.value.escalated_alert_sent == true)) | length')
 
             if [ "$escalated_count" != "0" ]; then
                 echo ""
-                echo "🚨 ¡ESCALACIÓN DETECTADA!"
+                echo "🚨 ESCALATION DETECTED!"
                 echo $escalation_status | jq '.'
                 break
             fi
@@ -121,10 +121,10 @@ for check in {1..50}; do  # 50 checks = ~100 segundos
         break
     fi
 
-    # Si el breaker se desactivó, intentar reactivar
+    # If the breaker deactivated, try to reactivate
     if [ "$current_triggered" = "false" ]; then
-        echo " (reactivando...)"
-        # Hacer algunos requests rápidos para reactivar
+        echo " (reactivating...)"
+        # Make some quick requests to reactivate
         for reactivate in {1..5}; do
             curl -s $SERVER_URL/test > /dev/null
             sleep 0.1
@@ -134,15 +134,15 @@ for check in {1..50}; do  # 50 checks = ~100 segundos
     sleep 2
 done
 
-# Detener requests en background
+# Stop background requests
 kill $BACKGROUND_PID 2>/dev/null
 
 echo ""
-echo "🔍 Estado final:"
+echo "🔍 Final status:"
 curl -s $SERVER_URL/breaker/staged-alerts | jq '.'
 
 echo ""
-echo "📋 Instrucciones:"
-echo "1. ¿Viste alertas pendientes durante la ejecución?"
-echo "2. ¿Se escalaron las alertas después de ~60 segundos?"
-echo "3. ¿Recibiste alertas en tu dashboard de OpsGenie?"
+echo "📋 Instructions:"
+echo "1. Did you see pending alerts during execution?"
+echo "2. Were the alerts escalated after ~60 seconds?"
+echo "3. Did you receive alerts in your OpsGenie dashboard?"

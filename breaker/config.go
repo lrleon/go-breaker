@@ -51,7 +51,7 @@ type OpsGenieConfig struct {
 	// Rate Limiting
 	AlertCooldownSeconds int `toml:"alert_cooldown_seconds"` // Minimum time between alerts
 
-	// ===== STAGED ALERTING CONFIGURATION (NUEVO) =====
+	// ===== STAGED ALERTING CONFIGURATION (NEW) =====
 	TimeBeforeSendAlert    int    `toml:"time_before_send_alert"`   // Seconds to wait before escalating
 	InitialAlertPriority   string `toml:"initial_alert_priority"`   // Priority for initial alert (P3, P4)
 	EscalatedAlertPriority string `toml:"escalated_alert_priority"` // Priority for escalated alert (P1, P2)
@@ -86,12 +86,6 @@ type OpsGenieConfig struct {
 
 // Environment types for the application
 type Environment string
-
-const (
-	EnvDevelopment Environment = "dev"
-	EnvUAT         Environment = "uat"
-	EnvProduction  Environment = "production"
-)
 
 // Config represents the main circuit breaker configuration
 type Config struct {
@@ -281,13 +275,13 @@ func createDefaultConfig() *Config {
 			AlertCooldownSeconds:  300,
 
 			// Staged alerting defaults
-			TimeBeforeSendAlert:    0,    // 0 = comportamiento original
-			InitialAlertPriority:   "P3", // Baja prioridad inicial
-			EscalatedAlertPriority: "P2", // Alta prioridad escalada
+			TimeBeforeSendAlert:    0,    // 0 = original behavior
+			InitialAlertPriority:   "P3", // Low initial priority
+			EscalatedAlertPriority: "P2", // High escalated priority
 
-			// Mandatory fields con defaults seguros
+			// Mandatory fields with safe defaults
 			Team:              "",
-			Environment:       "", // Se puede deducir de tags si es necesario
+			Environment:       "", // Can be deduced from tags if necessary
 			BookmakerID:       "",
 			Business:          "internal",
 			AdditionalContext: "",
@@ -978,7 +972,12 @@ func SaveOpsGenieConfig(path string, config *OpsGenieConfig) error {
 	if err != nil {
 		return fmt.Errorf("failed to create OpsGenie config file: %v", err)
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			log.Printf("Error closing OpsGenie config file: %v", err)
+		}
+	}(file)
 
 	encoder := toml.NewEncoder(file)
 	return encoder.Encode(config)
