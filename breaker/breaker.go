@@ -30,6 +30,9 @@ type BreakerDriver struct {
 	logger         *Logger
 	opsGenieClient *OpsGenieClient // OpsGenie client for sending alerts
 	configFile     string          // Path to the config file that was used to create this breaker
+
+	stagedAlertManager *StagedAlertManager // stagedAlertManager manages the staggered alert system for circuit breaker events.
+	lastTriggerTime    time.Time           //
 }
 
 func (b *BreakerDriver) IsEnabled() bool {
@@ -100,7 +103,7 @@ func NewBreaker(config *Config, configFile string) Breaker {
 		}
 	}
 
-	return &BreakerDriver{
+	driver := &BreakerDriver{
 		config:         *config,
 		latencyWindow:  lw,
 		enabled:        true,
@@ -108,6 +111,15 @@ func NewBreaker(config *Config, configFile string) Breaker {
 		opsGenieClient: opsGenieClient,
 		configFile:     configFile,
 	}
+
+	// Initialize the staged alert manager
+	if config.OpsGenie != nil && config.OpsGenie.Enabled &&
+		config.OpsGenie.TimeBeforeSendAlert > 0 && opsGenieClient != nil {
+		driver.stagedAlertManager = NewStagedAlertManager(config.OpsGenie, opsGenieClient)
+		logger.Logf("Staged alerting enabled (escalation after %ds)", config.OpsGenie.TimeBeforeSendAlert)
+	}
+
+	return driver
 }
 
 // NewBreakerFromConfigFile creates a new Breaker instance from a TOML configuration file.
@@ -297,11 +309,25 @@ func (b *BreakerDriver) Done(startTime, endTime time.Time) {
 
 		// Send OpsGenie alert for breaker triggered
 		if b.opsGenieClient != nil && b.config.OpsGenie != nil && b.config.OpsGenie.Enabled {
-			go func() {
-				if err := b.opsGenieClient.SendBreakerOpenAlert(latencyPercentile, memoryStatus, b.config.WaitTime); err != nil {
-					b.logger.Logf("Failed to send OpsGenie alert for breaker open: %v", err)
-				}
-			}()
+			if b.stagedAlertManager != nil {
+				// Use staged alerting system
+				context := &AlertContext{TriggerTime: time.Now(),
+					PeakLatency:     latencyPercentile,
+					AverageLatency:  latencyPercentile,
+					TriggerReason:   b.determineTriggerReason(memoryStatus, latencyAboveThreshold),
+					MemoryUsage:     b.getMemoryUsagePercent(),
+					RecentLatencies: []int64{latencyPercentile}, // Simple array
+					WaitTime:        b.config.WaitTime,
+					TimeBeforeAlert: b.config.OpsGenie.TimeBeforeSendAlert}
+				go b.stagedAlertManager.OnBreakerTriggered(context, b)
+			} else {
+				// Use original immediate alerting system
+				go func() {
+					if err := b.opsGenieClient.SendBreakerOpenAlert(latencyPercentile, memoryStatus, b.config.WaitTime); err != nil {
+						b.logger.Logf("Failed to send OpsGenie alert for breaker open: %v", err)
+					}
+				}()
+			}
 		}
 	}
 }
@@ -359,4 +385,27 @@ func (b *BreakerDriver) GetConfigFile() string {
 		return "breakers.toml"
 	}
 	return b.configFile
+}
+
+// determineTriggerReason determina la razón del disparo
+func (b *BreakerDriver) determineTriggerReason(memoryOK bool, latencyAboveThreshold bool) string {
+	if !memoryOK && latencyAboveThreshold {
+		return "memory_and_latency"
+	} else if !memoryOK {
+		return "memory_threshold"
+	} else if latencyAboveThreshold {
+		return "latency_threshold"
+	}
+	return "circuit_breaker_triggered"
+}
+
+// getMemoryUsagePercent calcula el porcentaje de uso de memoria
+func (b *BreakerDriver) getMemoryUsagePercent() float64 {
+	if MemoryLimit <= 0 {
+		return 0.0
+	}
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return float64(m.Alloc) / float64(MemoryLimit) * 100.0
 }

@@ -1,0 +1,227 @@
+package breaker
+
+import (
+  "fmt"
+  "log"
+  "sync"
+  "time"
+)
+
+// AlertContext Contains incident information
+type AlertContext struct {
+  TriggerTime     time.Time `json:"trigger_time"`
+  PeakLatency     int64     `json:"peak_latency_ms"`
+  AverageLatency  int64     `json:"average_latency_ms"`
+  TriggerReason   string    `json:"trigger_reason"`
+  MemoryUsage     float64   `json:"memory_usage_percent"`
+  RecentLatencies []int64   `json:"recent_latencies_ms"`
+  WaitTime        int       `json:"wait_time_seconds"`
+  TimeBeforeAlert int       `json:"time_before_alert_seconds"`
+}
+
+// PendingAlert represents an pending scaling alert
+type PendingAlert struct {
+  ID                 string
+  TriggerTime        time.Time
+  InitialAlertSent   bool
+  EscalatedAlertSent bool
+  Context            *AlertContext
+  ScheduledCheck     time.Time
+  BreakerInstance    Breaker // Reference to Breaker to verify status
+}
+
+// StagedAlertManager handles staggered alerts
+type StagedAlertManager struct {
+  config         *OpsGenieConfig
+  opsGenieClient *OpsGenieClient
+  mutex          sync.RWMutex
+  pendingAlerts  map[string]*PendingAlert
+  checkTicker    *time.Ticker
+  stopChan       chan bool
+}
+
+// NewStagedAlertManager creates a new staggered alert manager
+func NewStagedAlertManager(config *OpsGenieConfig, opsGenieClient *OpsGenieClient) *StagedAlertManager {
+  manager := &StagedAlertManager{
+    config:         config,
+    opsGenieClient: opsGenieClient,
+    pendingAlerts:  make(map[string]*PendingAlert),
+    checkTicker:    time.NewTicker(10 * time.Second), // Check every 10 seconds
+    stopChan:       make(chan bool),
+  }
+
+  go manager.monitorPendingAlerts()
+  return manager
+}
+
+// OnBreakerTriggered is called when the circuit breaker shoots
+func (sam *StagedAlertManager) OnBreakerTriggered(context *AlertContext, breakerInstance Breaker) {
+  sam.mutex.Lock()
+  defer sam.mutex.Unlock()
+
+  alertID := fmt.Sprintf("alert-%d", time.Now().Unix())
+
+  pending := &PendingAlert{
+    ID:                 alertID,
+    TriggerTime:        context.TriggerTime,
+    InitialAlertSent:   false,
+    EscalatedAlertSent: false,
+    Context:            context,
+    ScheduledCheck:     context.TriggerTime.Add(time.Duration(sam.config.TimeBeforeSendAlert) * time.Second),
+    BreakerInstance:    breakerInstance,
+  }
+
+  sam.pendingAlerts[alertID] = pending
+
+  log.Printf("🔄 Circuit breaker triggered. Staging alert for %d seconds before escalation",
+    sam.config.TimeBeforeSendAlert)
+
+  // Send initial low priority alert
+  go sam.sendInitialAlert(pending)
+}
+
+// sendInitialAlert sends the initial low priority alert (P3/P4)
+func (sam *StagedAlertManager) sendInitialAlert(pending *PendingAlert) {
+  if !sam.config.TriggerOnOpen {
+    return
+  }
+
+  log.Printf("📤 Sending initial alert for breaker activation")
+  log.Printf("📊 Peak latency: %dms, Memory usage: %.1f%%, Wait time: %ds",
+    pending.Context.PeakLatency,
+    pending.Context.MemoryUsage,
+    pending.Context.WaitTime)
+
+  //Use existing OPSGENIE system - simpler method
+  err := sam.opsGenieClient.SendBreakerOpenAlert(
+    pending.Context.PeakLatency,
+    pending.Context.MemoryUsage > 80,
+    pending.Context.WaitTime,
+  )
+
+  if err != nil {
+    log.Printf("❌ Failed to send initial alert: %v", err)
+    return
+  }
+
+  sam.mutex.Lock()
+  pending.InitialAlertSent = true
+  sam.mutex.Unlock()
+
+  log.Printf("📤 Initial monitoring alert sent (Priority: %s)", sam.config.InitialAlertPriority)
+}
+
+// monitorPendingAlerts monitors pending alerts for escalation
+func (sam *StagedAlertManager) monitorPendingAlerts() {
+  for {
+    select {
+    case <-sam.checkTicker.C:
+      sam.checkPendingAlerts()
+    case <-sam.stopChan:
+      return
+    }
+  }
+}
+
+// checkPendingAlerts Verify whether alerts should be climbed or resolved
+func (sam *StagedAlertManager) checkPendingAlerts() {
+  sam.mutex.Lock()
+  defer sam.mutex.Unlock()
+
+  now := time.Now()
+
+  for alertID, pending := range sam.pendingAlerts {
+    // Verify if it's time to evaluate this alert
+    if now.After(pending.ScheduledCheck) && !pending.EscalatedAlertSent {
+
+      // Verify if the breaker is still shooting
+      isStillTriggered := pending.BreakerInstance.TriggeredByLatencies()
+
+      if isStillTriggered {
+        // Escalate: The problem persists
+        go sam.sendEscalatedAlert(pending)
+        pending.EscalatedAlertSent = true
+        log.Printf("🚨 Alert escalated: Breaker has been triggered consistently for %d seconds",
+          sam.config.TimeBeforeSendAlert)
+      } else {
+        // Resolve: the breaker is no longer tripped
+        go sam.sendResolutionAlert(pending, "automatic_recovery")
+        delete(sam.pendingAlerts, alertID)
+        log.Printf("✅ Alert resolved: Breaker recovered within monitoring period")
+      }
+    }
+
+    // Clean very old alerts (security mechanism)
+    if now.Sub(pending.TriggerTime) > time.Duration(sam.config.TimeBeforeSendAlert*3)*time.Second {
+      if !pending.EscalatedAlertSent {
+        log.Printf("⚠️  Cleaning up stale alert: %s", alertID)
+      }
+      delete(sam.pendingAlerts, alertID)
+    }
+  }
+}
+
+// sendEscalatedAlert Send high priority escalation alert
+func (sam *StagedAlertManager) sendEscalatedAlert(pending *PendingAlert) {
+  duration := time.Since(pending.TriggerTime)
+
+  log.Printf("🚨 Sending escalated alert - Issue persists after %v", duration)
+  log.Printf("📊 Context: Latency %dms, Memory %.1f%%, Reason: %s",
+    pending.Context.PeakLatency,
+    pending.Context.MemoryUsage,
+    pending.Context.TriggerReason)
+
+  // Use existing OPSGENIE system but with a scaling context
+  err := sam.opsGenieClient.SendBreakerOpenAlert(
+    pending.Context.PeakLatency,
+    pending.Context.MemoryUsage > 80,
+    pending.Context.WaitTime,
+  )
+
+  if err != nil {
+    log.Printf("❌ Failed to send escalated alert: %v", err)
+    return
+  }
+
+  log.Printf("🚨 Escalated alert sent (Priority: %s) - Issue persists after %v",
+    sam.config.EscalatedAlertPriority, duration)
+}
+
+// sendResolutionAlert Send Resolution Alert
+func (sam *StagedAlertManager) sendResolutionAlert(pending *PendingAlert, method string) {
+  duration := time.Since(pending.TriggerTime)
+
+  log.Printf("✅ Sending resolution alert - Recovered after %v using %s", duration, method)
+
+  // Use existing OPSGENIE system for resolution
+  err := sam.opsGenieClient.SendBreakerResetAlert()
+
+  if err != nil {
+    log.Printf("❌ Failed to send resolution alert: %v", err)
+    return
+  }
+
+  log.Printf("✅ Resolution alert sent - Circuit breaker recovered after %v", duration)
+}
+
+// OnBreakerRecovered is called when the circuit breaker recovers
+func (sam *StagedAlertManager) OnBreakerRecovered() {
+  sam.mutex.Lock()
+  defer sam.mutex.Unlock()
+
+  // Mark all pending alerts as resolved
+  for alertID, pending := range sam.pendingAlerts {
+    if !pending.EscalatedAlertSent {
+      go sam.sendResolutionAlert(pending, "automatic_recovery")
+    }
+    delete(sam.pendingAlerts, alertID)
+  }
+
+  log.Printf("✅ All pending alerts resolved - Circuit breaker recovered")
+}
+
+// Stop The staggered alert manager stops
+func (sam *StagedAlertManager) Stop() {
+  close(sam.stopChan)
+  sam.checkTicker.Stop()
+}

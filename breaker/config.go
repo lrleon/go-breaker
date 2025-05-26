@@ -20,6 +20,12 @@ type ContactInfo struct {
 	AdditionalEmails []string `toml:"additional_emails"` // Additional notification emails
 }
 
+// EnvironmentSettingsConfig represents environment-specific settings
+type EnvironmentSettingsConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	Priority string `toml:"priority"`
+}
+
 // OpsGenieConfig represents the OpsGenie integration configuration with all mandatory fields
 type OpsGenieConfig struct {
 	// Basic OpsGenie Settings
@@ -45,18 +51,23 @@ type OpsGenieConfig struct {
 	// Rate Limiting
 	AlertCooldownSeconds int `toml:"alert_cooldown_seconds"` // Minimum time between alerts
 
+	// ===== STAGED ALERTING CONFIGURATION (NUEVO) =====
+	TimeBeforeSendAlert    int    `toml:"time_before_send_alert"`   // Seconds to wait before escalating
+	InitialAlertPriority   string `toml:"initial_alert_priority"`   // Priority for initial alert (P3, P4)
+	EscalatedAlertPriority string `toml:"escalated_alert_priority"` // Priority for escalated alert (P1, P2)
+
 	// MANDATORY FIELDS - Required for all alerts
-	Team         string `toml:"team"`          // ✅ MANDATORY: OpsGenie team name (must match OpsGenie)
-	Environment  string `toml:"environment"`   // ✅ MANDATORY: DEV, CI, UAT, PROD, etc. (fallback to "Environment" env var)
-	BookmakerID  string `toml:"bookmaker_id"`  // ✅ MANDATORY: Project/Client ID
+	Team         string `toml:"team"`          // OpsGenie team name (must match OpsGenie)
+	Environment  string `toml:"environment"`   // DEV, CI, UAT, PROD, etc.
+	BookmakerID  string `toml:"bookmaker_id"`  // Project/Client ID
 	ProjectID    string `toml:"project_id"`    // Alternative to bookmaker_id
-	Hostname     string `toml:"hostname"`      // ✅ MANDATORY: Machine hostname (auto-detected if empty)
+	Hostname     string `toml:"hostname"`      // Machine hostname (auto-detected if empty)
 	HostOverride string `toml:"host_override"` // Manual hostname override
-	Business     string `toml:"business"`      // ✅ MANDATORY: Business unit (internal, external, etc.)
+	Business     string `toml:"business"`      // Business unit (internal, external, etc.)
 	BusinessUnit string `toml:"business_unit"` // More specific business unit
 
 	// ADDITIONAL CONTEXT - Custom information tag
-	AdditionalContext string `toml:"additional_context"` // ✅ Optional: Any additional context you want to include
+	AdditionalContext string `toml:"additional_context"` // Any additional context
 
 	// API Information (Enhanced)
 	APINamespace    string   `toml:"api_namespace"`    // Namespace/environment of the API
@@ -245,25 +256,42 @@ func createDefaultConfig() *Config {
 		TrendAnalysisEnabled:        true,
 		TrendAnalysisMinSampleCount: 10,
 		OpsGenie: &OpsGenieConfig{
-			Enabled:               false,
-			Region:                "us",
-			Priority:              "P3",
-			Source:                "go-breaker",
-			Tags:                  []string{"circuit-breaker"},
-			TriggerOnOpen:         true,
-			TriggerOnReset:        false,
-			TriggerOnMemory:       true,
-			TriggerOnLatency:      true,
+			// Basic settings
+			Enabled:  false,
+			Region:   "us",
+			Priority: "P3",
+			Source:   "go-breaker",
+
+			Tags: []string{
+				"Environment:production",
+				"Component:circuit-breaker",
+				"Service:api",
+			},
+
+			// Alert triggers
+			TriggerOnOpen:    true,
+			TriggerOnReset:   false,
+			TriggerOnMemory:  true,
+			TriggerOnLatency: true,
+
+			// Alert content
 			IncludeLatencyMetrics: true,
 			IncludeMemoryMetrics:  true,
 			IncludeSystemInfo:     true,
 			AlertCooldownSeconds:  300,
-			// Mandatory fields with fallback indicators
-			Team:              "",         // Will be validated and use fallbacks
-			Environment:       "",         // Will read from "Environment" env var if empty
-			BookmakerID:       "",         // Will use environment variables if empty
-			Business:          "internal", // Default value
-			AdditionalContext: "",         // Optional field
+
+			// Staged alerting defaults
+			TimeBeforeSendAlert:    0,    // 0 = comportamiento original
+			InitialAlertPriority:   "P3", // Baja prioridad inicial
+			EscalatedAlertPriority: "P2", // Alta prioridad escalada
+
+			// Mandatory fields con defaults seguros
+			Team:              "",
+			Environment:       "", // Se puede deducir de tags si es necesario
+			BookmakerID:       "",
+			Business:          "internal",
+			AdditionalContext: "",
+
 			// API Information defaults
 			APINamespace:   "",
 			APIName:        "",
@@ -272,6 +300,9 @@ func createDefaultConfig() *Config {
 			APIDescription: "",
 			APIPriority:    "",
 			ServiceTier:    "",
+
+			// Contact details default
+			ContactDetails: ContactInfo{},
 		},
 	}
 }
