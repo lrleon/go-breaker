@@ -346,6 +346,12 @@ func (o *OpsGenieClient) Initialize() error {
 		return fmt.Errorf("OpsGenieClient is nil")
 	}
 
+	// If it is disabled, do nothing
+	if o.config == nil || !o.config.Enabled {
+		log.Printf("OpsGenie client is disabled, skipping initialization")
+		return nil // Return without error but without initializing
+	}
+
 	// Validate mandatory fields at initialization
 	if err := o.ValidateMandatoryFields(); err != nil {
 		log.Printf("WARNING: Mandatory fields validation failed during initialization: %v", err)
