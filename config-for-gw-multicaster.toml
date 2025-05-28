@@ -270,3 +270,21 @@ schema = '''
   "cooldown_seconds": "number"
 }
 '''
+
+[[endpoints]]
+name = "Trigger Breaker by Memory"
+path = "/breaker/trigger-by-memory"
+method = "GET"
+description = "Manually trigger the circuit breaker by simulating a memory threshold breach"
+
+[[endpoints]]
+name = "Trigger Breaker by Latency"
+path = "/breaker/trigger-by-latency"
+method = "GET"
+description = "Manually trigger the circuit breaker by adding high latency measurements"
+
+[[endpoints]]
+name = "Restore Memory Check"
+path = "/breaker/restore-memory-check"
+method = "GET"
+description = "Restore normal memory checking behavior after manual memory trigger"

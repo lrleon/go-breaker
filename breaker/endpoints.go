@@ -46,12 +46,12 @@ func NewBreakerAPI(config *Config) *BreakerAPI {
 	}
 }
 
-func NewBreakerAPIFromFile(pathToConfig string) *BreakerAPI {
+func NewBreakerAPIFromFile(pathToConfig string) (*BreakerAPI, error) {
 	config, err := LoadConfig(pathToConfig)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("failed to load config from file: %w", err)
 	}
-	return NewBreakerAPI(config)
+	return NewBreakerAPI(config), nil
 }
 
 func (b *BreakerAPI) SetEnabled(ctx *gin.Context) {
@@ -395,6 +395,16 @@ type BreakerStatus struct {
 	HasPositiveTrend            bool `json:"has_positive_trend"`
 }
 
+// StagedAlertInfo Represents information about the stepped alert system
+type StagedAlertInfo struct {
+	Enabled            bool                              `json:"enabled"`
+	TimeBeforeAlert    int                               `json:"time_before_alert_seconds"`
+	InitialPriority    string                            `json:"initial_priority"`
+	EscalatedPriority  string                            `json:"escalated_priority"`
+	PendingAlertsCount int                               `json:"pending_alerts_count"`
+	PendingAlerts      map[string]map[string]interface{} `json:"pending_alerts,omitempty"`
+}
+
 // GetBreakerStatus returns detailed information about the current state of the circuit breaker
 func (b *BreakerAPI) GetBreakerStatus(ctx *gin.Context) {
 	b.lock.Lock()
@@ -433,6 +443,28 @@ func (b *BreakerAPI) GetBreakerStatus(ctx *gin.Context) {
 		hasPositiveTrend = driver.latencyWindow.HasPositiveTrend(driver.config.TrendAnalysisMinSampleCount)
 	}
 
+	// Get staged alert information
+	stagedAlertInfo := StagedAlertInfo{
+		Enabled:            driver.stagedAlertManager != nil,
+		TimeBeforeAlert:    0,
+		InitialPriority:    "",
+		EscalatedPriority:  "",
+		PendingAlertsCount: 0,
+		PendingAlerts:      make(map[string]map[string]interface{}),
+	}
+
+	if driver.stagedAlertManager != nil && driver.config.OpsGenie != nil {
+		stagedAlertInfo.TimeBeforeAlert = driver.config.OpsGenie.TimeBeforeSendAlert
+		stagedAlertInfo.InitialPriority = driver.config.OpsGenie.InitialAlertPriority
+		stagedAlertInfo.EscalatedPriority = driver.config.OpsGenie.EscalatedAlertPriority
+		stagedAlertInfo.PendingAlertsCount = driver.stagedAlertManager.GetPendingAlertsCount()
+
+		// Just include outstanding alert details if any
+		if stagedAlertInfo.PendingAlertsCount > 0 {
+			stagedAlertInfo.PendingAlerts = driver.stagedAlertManager.GetPendingAlertsInfo()
+		}
+	}
+
 	// Prepare the status object
 	status := BreakerStatus{
 		Enabled:                     driver.enabled,
@@ -465,25 +497,24 @@ func (b *BreakerAPI) GetBreakerStatus(ctx *gin.Context) {
 
 // OpsGenieStatusResponse represents the current configuration and status of OpsGenie integration
 type OpsGenieStatusResponse struct {
-	Enabled               bool                    `json:"enabled"`
-	APIKey                string                  `json:"api_key,omitempty"`
-	Region                string                  `json:"region"`
-	Priority              string                  `json:"priority"`
-	Source                string                  `json:"source"`
-	Team                  string                  `json:"team"`
-	Tags                  []string                `json:"tags"`
-	TriggerOnOpen         bool                    `json:"trigger_on_breaker_open"`
-	TriggerOnReset        bool                    `json:"trigger_on_breaker_reset"`
-	TriggerOnMemory       bool                    `json:"trigger_on_memory_threshold"`
-	TriggerOnLatency      bool                    `json:"trigger_on_latency_threshold"`
-	IncludeLatencyMetrics bool                    `json:"include_latency_metrics"`
-	IncludeMemoryMetrics  bool                    `json:"include_memory_metrics"`
-	IncludeSystemInfo     bool                    `json:"include_system_info"`
-	AlertCooldownSeconds  int                     `json:"alert_cooldown_seconds"`
-	UseEnvironments       bool                    `json:"use_environments"`
-	CurrentEnvironment    string                  `json:"current_environment,omitempty"`
-	EnvironmentSettings   map[string]EnvOpsConfig `json:"environment_settings,omitempty"`
-	Initialized           bool                    `json:"initialized"`
+	Enabled               bool     `json:"enabled"`
+	APIKey                string   `json:"api_key,omitempty"`
+	Region                string   `json:"region"`
+	Priority              string   `json:"priority"`
+	Source                string   `json:"source"`
+	Team                  string   `json:"team"`
+	Tags                  []string `json:"tags"`
+	TriggerOnOpen         bool     `json:"trigger_on_breaker_open"`
+	TriggerOnReset        bool     `json:"trigger_on_breaker_reset"`
+	TriggerOnMemory       bool     `json:"trigger_on_memory_threshold"`
+	TriggerOnLatency      bool     `json:"trigger_on_latency_threshold"`
+	IncludeLatencyMetrics bool     `json:"include_latency_metrics"`
+	IncludeMemoryMetrics  bool     `json:"include_memory_metrics"`
+	IncludeSystemInfo     bool     `json:"include_system_info"`
+	AlertCooldownSeconds  int      `json:"alert_cooldown_seconds"`
+	UseEnvironments       bool     `json:"use_environments"`
+	CurrentEnvironment    string   `json:"current_environment,omitempty"`
+	Initialized           bool     `json:"initialized"`
 }
 
 // OpsGenieToggleRequest represents a request to enable or disable OpsGenie
@@ -538,19 +569,12 @@ func (b *BreakerAPI) GetOpsGenieStatus(ctx *gin.Context) {
 		IncludeMemoryMetrics:  b.Config.OpsGenie.IncludeMemoryMetrics,
 		IncludeSystemInfo:     b.Config.OpsGenie.IncludeSystemInfo,
 		AlertCooldownSeconds:  b.Config.OpsGenie.AlertCooldownSeconds,
-		UseEnvironments:       b.Config.OpsGenie.UseEnvironments,
 		Initialized:           opsgenieClient.IsInitialized(),
 	}
 
 	// Only include API key hint if it's set (don't show the actual key for security)
 	if b.Config.OpsGenie.APIKey != "" {
 		response.APIKey = "********" // Mask the actual key
-	}
-
-	// Include environment information if enabled
-	if b.Config.OpsGenie.UseEnvironments {
-		response.CurrentEnvironment = string(opsgenieClient.environment)
-		response.EnvironmentSettings = b.Config.OpsGenie.EnvironmentSettings
 	}
 
 	ctx.JSON(http.StatusOK, response)
@@ -782,6 +806,12 @@ func AddEndpointToRouter(router *gin.Engine, breakerAPI *BreakerAPI) {
 		breakerGroup.GET("/memory-limit", breakerAPI.GetMemoryLimit)
 		breakerGroup.POST("/reset", breakerAPI.Reset)
 
+		breakerGroup.GET("/trigger-by-memory", breakerAPI.TriggerBreakerByMemory)
+		breakerGroup.GET("/trigger-by-latency", breakerAPI.TriggerBreakerByLatency)
+		breakerGroup.GET("/restore-memory-check", breakerAPI.RestoreMemoryCheck)
+
+		breakerGroup.GET("/staged-alerts", breakerAPI.GetStagedAlertStatus)
+
 		// New OpsGenie endpoints
 		opsgenieGroup := breakerGroup.Group("/opsgenie")
 		{
@@ -805,4 +835,156 @@ func TotalMemoryMB() int64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	return int64(m.Sys / (1024 * 1024))
+}
+
+func (b *BreakerAPI) GetStagedAlertStatus(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	driver, ok := b.Driver.(*BreakerDriver)
+	if !ok {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Staged alerting not available",
+		})
+		return
+	}
+
+	if driver.stagedAlertManager == nil {
+		ctx.JSON(http.StatusOK, gin.H{
+			"enabled": false,
+			"message": "Staged alerting is not configured",
+		})
+		return
+	}
+
+	if b.Config.OpsGenie == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "OpsGenie configuration not available",
+		})
+		return
+	}
+
+	pendingCount := driver.stagedAlertManager.GetPendingAlertsCount()
+	pendingInfo := driver.stagedAlertManager.GetPendingAlertsInfo() // Este retorna el tipo correcto
+
+	response := gin.H{
+		"enabled":              true,
+		"time_before_alert":    b.Config.OpsGenie.TimeBeforeSendAlert,
+		"initial_priority":     b.Config.OpsGenie.InitialAlertPriority,
+		"escalated_priority":   b.Config.OpsGenie.EscalatedAlertPriority,
+		"pending_alerts_count": pendingCount,
+		"pending_alerts":       pendingInfo, // Sin cambio de tipo necesario aquí
+		"opsgenie_enabled":     b.Config.OpsGenie.Enabled,
+		"trigger_on_open":      b.Config.OpsGenie.TriggerOnOpen,
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+// TriggerBreakerByMemory forces the circuit breaker to open by simulating a memory threshold breach
+func (b *BreakerAPI) TriggerBreakerByMemory(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	// Get the current breaker driver
+	driver, ok := b.Driver.(*BreakerDriver)
+	if !ok {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Unable to access breaker driver",
+		})
+		return
+	}
+
+	// Force memory check to fail to trigger the breaker
+	SetMemoryOK(driver, false)
+
+	// Make the breaker check its status by calling Allow() which will trigger it
+	allowed := b.Driver.Allow()
+
+	// Log the action
+	log.Printf("Circuit breaker manually triggered by memory threshold breach via API")
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message":   "Circuit breaker triggered by memory threshold breach",
+		"triggered": !allowed,
+		"reason":    "manual_memory_trigger",
+		"note":      "Use /breaker/restore-memory-check to restore normal memory checking",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// TriggerBreakerByLatency forces the circuit breaker to open by adding high latency measurements
+func (b *BreakerAPI) TriggerBreakerByLatency(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	// Get the current breaker driver
+	_, ok := b.Driver.(*BreakerDriver)
+	if !ok {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Unable to access breaker driver",
+		})
+		return
+	}
+
+	// Add multiple high latency measurements to trigger the breaker
+	now := time.Now()
+	triggerLatency := b.Config.LatencyThreshold + 500 // Add 500ms above threshold
+
+	// Add enough measurements to ensure the percentile goes above threshold
+	windowSize := b.Config.LatencyWindowSize
+	if windowSize < 10 {
+		windowSize = 10 // Minimum to ensure triggering
+	}
+
+	for i := 0; i < windowSize; i++ {
+		// Create artificial latency measurements
+		startTime := now.Add(time.Duration(i)*time.Second - time.Duration(triggerLatency)*time.Millisecond)
+		endTime := now.Add(time.Duration(i) * time.Second)
+		b.Driver.Done(startTime, endTime)
+	}
+
+	// Check if the breaker was triggered
+	triggered := b.Driver.TriggeredByLatencies()
+
+	// Log the action
+	log.Printf("Circuit breaker manually triggered by latency threshold breach via API")
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message":            "Circuit breaker triggered by latency threshold breach",
+		"triggered":          triggered,
+		"reason":             "manual_latency_trigger",
+		"latency_used":       triggerLatency,
+		"measurements_added": windowSize,
+		"note":               "Will auto-restore after normal requests and wait time, or use /breaker/reset",
+		"timestamp":          time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// RestoreMemoryCheck restores normal memory checking behavior after manual trigger
+func (b *BreakerAPI) RestoreMemoryCheck(ctx *gin.Context) {
+	b.lock.Lock()
+	defer b.lock.Unlock()
+
+	// Get the current breaker driver
+	driver, ok := b.Driver.(*BreakerDriver)
+	if !ok {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Unable to access breaker driver",
+		})
+		return
+	}
+
+	// Restore normal memory checking
+	SetMemoryOK(driver, true)
+
+	// Log the action
+	log.Printf("Memory check restored to normal behavior via API")
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message":   "Memory check restored to normal behavior",
+		"action":    "memory_check_restored",
+		"note":      "Circuit breaker will now use actual memory usage for decisions",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
 }

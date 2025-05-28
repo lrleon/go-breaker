@@ -24,7 +24,6 @@ func TestCooldownPreventsRepeatedAlerts(t *testing.T) {
 		APIName:              "test-api",
 		APIVersion:           "1.0",
 		Source:               "test",
-		UseEnvironments:      false,
 	}
 
 	// Create an independent OpsGenie client for this test (don't use the singleton)

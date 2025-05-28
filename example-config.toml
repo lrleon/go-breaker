@@ -16,7 +16,7 @@ priority = "P2"
 # Staged alerting configuration
 time_before_send_alert = 60
 initial_alert_priority = "P3"
-escalated_alert_priority = "P2"
+escalated_alert_priority = "P1"
 
 # Alert triggers
 trigger_on_breaker_open = true

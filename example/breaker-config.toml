@@ -1,0 +1,208 @@
+# Configuration optimized for testing with OpsGenie
+# File: breakers.toml
+
+#==============================================================================
+# CIRCUIT BREAKER CONFIGURATION (Optimized for quick testing)
+#==============================================================================
+
+memory_threshold = 80.0              # 80% - easy to trigger with memory_overload scenario
+latency_threshold = 1500             # 1500ms - triggers with high_latency scenario
+latency_window_size = 64             # Small window for quick testing
+percentile = 0.95                    # 95th percentile
+wait_time = 10                       # 10 seconds - short time for testing
+trend_analysis_enabled = true        # Enabled to test trend analysis
+trend_analysis_min_sample_count = 5  # Only 5 samples to activate quickly
+
+#==============================================================================
+# OPSGENIE INTEGRATION - TESTING CONFIGURATION
+#==============================================================================
+
+[opsgenie]
+# Basic Configuration
+enabled = true
+region = "us"
+priority = "P3"                      # P3 for testing (not critical)
+source = "go-breaker-test-server"
+
+# Tags to identify test alerts
+tags = [
+    "test",
+    "circuit-breaker",
+    "go-breaker",
+    "development"
+]
+
+# Alert Configuration (all enabled for testing)
+trigger_on_breaker_open = true       # ✅ Test circuit open
+trigger_on_breaker_reset = true      # ✅ Test circuit reset
+trigger_on_memory_threshold = true   # ✅ Test memory alerts
+trigger_on_latency_threshold = true  # ✅ Test latency alerts
+
+# Include all available information
+include_latency_metrics = true
+include_memory_metrics = true
+include_system_info = true
+
+# Short cooldown for testing (60 seconds instead of 300)
+alert_cooldown_seconds = 60
+
+#==============================================================================
+# MANDATORY FIELDS - COMPLETE THESE VALUES!
+#==============================================================================
+
+# ✅ MANDATORY: OpsGenie team name (must exist in your OpsGenie)
+team = "test-team"                   # 🔧 CHANGE to your real team
+
+# ✅ MANDATORY: Environment (fallback to "Environment" variable)
+environment = "TEST"                 # Perfect for testing
+
+# ✅ MANDATORY: BookmakerID/ProjectID
+bookmaker_id = "test-bookmaker-123"  # 🔧 CHANGE to your real ID
+# project_id = "test-project-123"    # Alternative to bookmaker_id
+
+# ✅ MANDATORY: Business unit
+business = "internal"                # Safe value for testing
+business_unit = "engineering"        # More specific
+
+# ✅ OPTIONAL: Additional context (appears in tags and details)
+additional_context = "circuit-breaker-testing-server"
+
+# Hostname is auto-detected, but you can override:
+# hostname = "test-server-01"
+# host_override = "manual-hostname"
+
+#==============================================================================
+# API INFORMATION (For context in alerts)
+#==============================================================================
+
+api_name = "Circuit Breaker Test API"
+api_version = "v1.0.0-test"
+api_namespace = "testing"
+api_description = "Test server for circuit breaker and OpsGenie integration testing"
+api_owner = "Development Team"
+api_priority = "low"                 # Low priority for testing
+service_tier = "development"
+
+# Dependencies we might be testing
+api_dependencies = [
+    "test-database",
+    "mock-auth-service",
+    "test-cache"
+]
+
+# Endpoints protected by the circuit breaker
+api_endpoints = [
+    "/test",
+    "/test/delay",
+    "/test/trigger"
+]
+
+#==============================================================================
+# CONTACT INFORMATION
+#==============================================================================
+
+[opsgenie.contact_details]
+primary_contact = "dev-team@company.com"        # 🔧 CHANGE to real email
+escalation_team = "platform-oncall"             # 🔧 CHANGE to real team
+slack_channel = "#circuit-breaker-testing"      # 🔧 CHANGE to real channel
+phone_number = "+1-555-0123"                    # Optional
+additional_emails = [
+    "alerts@company.com",                        # 🔧 CHANGE to real emails
+    "oncall@company.com"
+]
+
+#==============================================================================
+# CUSTOM ATTRIBUTES (Appear in alert Details)
+#==============================================================================
+
+[opsgenie.api_custom_attributes]
+environment_type = "testing"
+deployment_method = "local"
+test_server = "true"
+alerting_test = "opsgenie-integration"
+version = "v1.0.0"
+maintainer = "development-team"
+
+#==============================================================================
+# ENVIRONMENT-SPECIFIC SETTINGS (For environment testing)
+#==============================================================================
+
+use_environments = false            # Simplified for direct testing
+
+# If you want to test environment-specific settings, change to true:
+# use_environments = true
+
+[opsgenie.environment_settings]
+[opsgenie.environment_settings.TEST]
+enabled = true
+priority = "P4"
+
+[opsgenie.environment_settings.DEV]
+enabled = true
+priority = "P5"
+
+[opsgenie.environment_settings.PROD]
+enabled = true
+priority = "P1"
+
+#==============================================================================
+# SETUP INSTRUCTIONS
+#==============================================================================
+
+# 🔧 BEFORE USING THIS CONFIGURATION:
+#
+# 1. Configure MANDATORY environment variables:
+#    export OPSGENIE_API_KEY="your-complete-api-key"
+#    export Environment="TEST"
+#
+# 2. CHANGE these values to your organization's real ones:
+#    - team = "your-real-team"                    (line 30)
+#    - primary_contact = "your-email@company.com" (line 73)
+#    - escalation_team = "your-oncall-team"       (line 74)
+#    - slack_channel = "#your-channel"            (line 75)
+#
+# 3. OPTIONAL - Change these if you want:
+#    - bookmaker_id = "your-project-id"          (line 36)
+#    - additional_context = "your-context"       (line 42)
+
+#==============================================================================
+# TESTING WORKFLOW WITH THIS CONFIGURATION
+#==============================================================================
+
+# Once configured:
+#
+# 1. Start server: go run enhanced_test_server.go
+# 2. Verify: curl http://localhost:8080/opsgenie/validate
+# 3. Test connection: curl http://localhost:8080/opsgenie/test-connection
+# 4. Send test alert: curl -X POST http://localhost:8080/opsgenie/send-test-alert
+# 5. Activate scenarios: curl -X POST http://localhost:8080/test/trigger -d '{"scenario":"high_latency"}'
+# 6. Monitor OpsGenie dashboard to see alerts with all mandatory fields
+
+#==============================================================================
+# EXPECTED ALERT STRUCTURE IN OPSGENIE
+#==============================================================================
+
+# Message: "[TEST] Circuit Breaker OPEN - testing/Circuit Breaker Test API"
+#
+# Tags:
+#   - test, circuit-breaker, go-breaker, development
+#   - env:test, environment:test
+#   - bookmaker:test-bookmaker-123
+#   - host:your-real-hostname
+#   - business:internal
+#   - team:test-team
+#   - alert-type:circuit-open
+#   - context:circuit-breaker-testing-server
+#   - service:Circuit Breaker Test API
+#   - tier:development
+#
+# Details:
+#   - Team: test-team
+#   - Environment: TEST
+#   - BookmakerId: test-bookmaker-123
+#   - Host: your-real-hostname
+#   - Business: internal
+#   - AdditionalContext: circuit-breaker-testing-server
+#   - API Name: Circuit Breaker Test API
+#   - Alert Type: circuit-open
+#   - (+ specific metrics for alert type)

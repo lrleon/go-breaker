@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,8 +19,19 @@ const (
 	EnvOpsGenieAPIKey = "OPSGENIE_API_KEY"
 	EnvOpsGenieRegion = "OPSGENIE_REGION"
 	EnvOpsGenieAPIURL = "OPSGENIE_API_URL"
-	EnvEnvironment    = "ENVIRONMENT" // Environment variable to determine the current environment
+	EnvEnvironment    = "Environment" // Exact variable name as requested
 )
+
+// MandatoryFieldsValidationError represents validation errors for mandatory fields
+type MandatoryFieldsValidationError struct {
+	MissingFields []string
+	InvalidFields map[string]string
+}
+
+func (e *MandatoryFieldsValidationError) Error() string {
+	return fmt.Sprintf("Mandatory fields validation failed - Missing: %v, Invalid: %v",
+		e.MissingFields, e.InvalidFields)
+}
 
 // MemoryStatus represents the current memory status of the application
 type MemoryStatus struct {
@@ -37,17 +50,13 @@ var (
 )
 
 // GetOpsGenieClient returns a singleton instance of the OpsGenie client
-// Ensures that only one shared instance of the client exists across the application
 func GetOpsGenieClient(config *OpsGenieConfig) *OpsGenieClient {
 	opsgenieClientMutex.Lock()
 	defer opsgenieClientMutex.Unlock()
 
-	// Check if instance exists or if configuration has changed
 	needsNew := opsgenieClientInstance == nil
 
-	// If the instance exists, check if the configuration has changed
 	if !needsNew && opsgenieClientInstance.config != nil {
-		// Only compare the parameters relevant to cooldown
 		if opsgenieClientInstance.config.AlertCooldownSeconds != config.AlertCooldownSeconds {
 			log.Printf("OpsGenie configuration has changed, recreating client")
 			needsNew = true
@@ -82,41 +91,253 @@ func NewOpsGenieClient(config *OpsGenieConfig) *OpsGenieClient {
 		config = &OpsGenieConfig{Enabled: false}
 	}
 
-	// Determine the current environment only if we're using environments
-	var env Environment
-	if config.UseEnvironments {
-		env = determineEnvironment()
-	}
-
 	return &OpsGenieClient{
 		config:        config,
 		lastAlertTime: make(map[string]time.Time),
 		alertSent:     make(map[string]bool),
-		environment:   env,
 	}
 }
 
-// determineEnvironment detects the current runtime environment
-func determineEnvironment() Environment {
-	// Check environment variable first
-	envValue := os.Getenv(EnvEnvironment)
-
-	switch envValue {
-	case string(EnvDevelopment):
-		return EnvDevelopment
-	case string(EnvUAT):
-		return EnvUAT
-	case string(EnvProduction):
-		return EnvProduction
-	default:
-		// Default to development if not specified
-		if envValue == "" {
-			log.Println("Environment not specified, defaulting to development")
-		} else {
-			log.Printf("Unknown environment '%s', defaulting to development", envValue)
+// ValidateMandatoryFields validates that all mandatory fields are present and valid
+func (o *OpsGenieClient) ValidateMandatoryFields() *MandatoryFieldsValidationError {
+	if o == nil || o.config == nil {
+		return &MandatoryFieldsValidationError{
+			MissingFields: []string{"config"},
 		}
-		return EnvDevelopment
 	}
+
+	var missingFields []string
+	invalidFields := make(map[string]string)
+
+	// Validate Team
+	if o.getTeamNameWithFallback() == "unknown-team" || o.config.Team == "" {
+		missingFields = append(missingFields, "team")
+	}
+
+	// Validate Environment
+	env := o.getEnvironmentWithFallback()
+	if env == "unknown" || env == "" {
+		missingFields = append(missingFields, "environment")
+	}
+
+	// Validate BookmakerID
+	bookmakerID := o.getBookmakerIDWithFallback()
+	if bookmakerID == "unknown" || bookmakerID == "" {
+		missingFields = append(missingFields, "bookmaker_id")
+	}
+
+	// Validate Host
+	hostname := o.getHostnameWithFallback()
+	if hostname == "unknown" || hostname == "" {
+		missingFields = append(missingFields, "hostname")
+	}
+
+	// Validate Business
+	business := o.getBusinessWithFallback()
+	if business == "" {
+		missingFields = append(missingFields, "business")
+	}
+
+	// Additional validations for field formats
+	if len(env) > 20 {
+		invalidFields["environment"] = "too long (max 20 characters)"
+	}
+
+	if len(bookmakerID) > 50 {
+		invalidFields["bookmaker_id"] = "too long (max 50 characters)"
+	}
+
+	// Return error if any issues found
+	if len(missingFields) > 0 || len(invalidFields) > 0 {
+		return &MandatoryFieldsValidationError{
+			MissingFields: missingFields,
+			InvalidFields: invalidFields,
+		}
+	}
+
+	return nil
+}
+
+// Enhanced getter methods with better fallbacks
+func (o *OpsGenieClient) getTeamNameWithFallback() string {
+	if o == nil || o.config == nil {
+		return "unknown-team"
+	}
+
+	if o.config.Team != "" {
+		return o.config.Team
+	}
+
+	if envTeam := os.Getenv("OPSGENIE_TEAM"); envTeam != "" {
+		return envTeam
+	}
+
+	return "unknown-team"
+}
+
+func (o *OpsGenieClient) getEnvironmentWithFallback() string {
+	if o == nil || o.config == nil {
+		return "unknown"
+	}
+
+	// Priority order with better fallbacks
+	if o.config.Environment != "" {
+		return strings.ToUpper(o.config.Environment)
+	}
+
+	// Check for the specific "Environment" environment variable
+	if envVar := os.Getenv("Environment"); envVar != "" {
+		return strings.ToUpper(envVar)
+	}
+
+	// Additional fallbacks
+	if envVar := os.Getenv("DEPLOYMENT_ENV"); envVar != "" {
+		return strings.ToUpper(envVar)
+	}
+
+	if o.config.APINamespace != "" {
+		return strings.ToUpper(o.config.APINamespace)
+	}
+
+	// Try to detect from hostname patterns
+	if hostname, err := os.Hostname(); err == nil {
+		if strings.Contains(hostname, "prod") {
+			return "PROD"
+		}
+		if strings.Contains(hostname, "staging") {
+			return "STAGING"
+		}
+		if strings.Contains(hostname, "dev") {
+			return "DEV"
+		}
+	}
+
+	return "unknown"
+}
+
+func (o *OpsGenieClient) getBookmakerIDWithFallback() string {
+	if o == nil || o.config == nil {
+		return "unknown"
+	}
+
+	// Priority order with environment variable fallbacks
+	if o.config.BookmakerID != "" {
+		return o.config.BookmakerID
+	}
+
+	if o.config.ProjectID != "" {
+		return o.config.ProjectID
+	}
+
+	// Try multiple environment variables
+	for _, envVar := range []string{"BOOKMAKER_ID", "PROJECT_ID", "CLIENT_ID", "SERVICE_ID"} {
+		if value := os.Getenv(envVar); value != "" {
+			return value
+		}
+	}
+
+	// Use API name as fallback
+	if o.config.APIName != "" {
+		return o.config.APIName
+	}
+
+	return "unknown"
+}
+
+func (o *OpsGenieClient) getHostnameWithFallback() string {
+	if o == nil || o.config == nil {
+		return "unknown"
+	}
+
+	// Priority order with multiple fallbacks
+	if o.config.HostOverride != "" {
+		return o.config.HostOverride
+	}
+
+	if o.config.Hostname != "" {
+		return o.config.Hostname
+	}
+
+	// Try multiple environment variables
+	for _, envVar := range []string{"HOSTNAME", "HOST", "CONTAINER_NAME", "POD_NAME"} {
+		if value := os.Getenv(envVar); value != "" {
+			return value
+		}
+	}
+
+	// Try to get system hostname
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		return hostname
+	}
+
+	// Last resort - try to get from /etc/hostname
+	if data, err := os.ReadFile("/etc/hostname"); err == nil {
+		if hostname := strings.TrimSpace(string(data)); hostname != "" {
+			return hostname
+		}
+	}
+
+	return "unknown"
+}
+
+func (o *OpsGenieClient) getBusinessWithFallback() string {
+	if o == nil || o.config == nil {
+		return "internal" // Safe default
+	}
+
+	if o.config.Business != "" {
+		return o.config.Business
+	}
+
+	if o.config.BusinessUnit != "" {
+		return o.config.BusinessUnit
+	}
+
+	// Try environment variables
+	for _, envVar := range []string{"BUSINESS_UNIT", "BUSINESS", "DEPARTMENT"} {
+		if value := os.Getenv(envVar); value != "" {
+			return value
+		}
+	}
+
+	return "internal" // Safe default
+}
+
+func (o *OpsGenieClient) getAdditionalContext() string {
+	if o == nil || o.config == nil {
+		return ""
+	}
+	return o.config.AdditionalContext
+}
+
+func (o *OpsGenieClient) getSourceWithFallback() string {
+	if o == nil || o.config == nil {
+		return "go-breaker"
+	}
+
+	if o.config.Source != "" {
+		return o.config.Source
+	}
+
+	return "go-breaker"
+}
+
+// buildMandatoryFieldsWithFallbacks creates mandatory fields with intelligent fallbacks
+func (o *OpsGenieClient) buildMandatoryFieldsWithFallbacks() map[string]string {
+	fields := map[string]string{
+		"Team":        o.getTeamNameWithFallback(),
+		"Environment": o.getEnvironmentWithFallback(),
+		"BookmakerId": o.getBookmakerIDWithFallback(),
+		"Host":        o.getHostnameWithFallback(),
+		"Business":    o.getBusinessWithFallback(),
+	}
+
+	// Add AdditionalContext if provided
+	if additionalContext := o.getAdditionalContext(); additionalContext != "" {
+		fields["AdditionalContext"] = additionalContext
+	}
+
+	return fields
 }
 
 // Initialize sets up the OpsGenie client and validates the API key
@@ -125,16 +346,27 @@ func (o *OpsGenieClient) Initialize() error {
 		return fmt.Errorf("OpsGenieClient is nil")
 	}
 
-	// Check if alerts are enabled for the current environment
-	if !o.isEnabledForEnvironment() {
-		log.Printf("OpsGenie integration is disabled for environment: %s", o.environment)
-		return nil
+	// If it is disabled, do nothing
+	if o.config == nil || !o.config.Enabled {
+		log.Printf("OpsGenie client is disabled, skipping initialization")
+		return nil // Return without error but without initializing
 	}
+
+	// Validate mandatory fields at initialization
+	if err := o.ValidateMandatoryFields(); err != nil {
+		log.Printf("WARNING: Mandatory fields validation failed during initialization: %v", err)
+		log.Printf("Alerts will be sent with fallback values. Please configure missing fields.")
+	}
+
+	o.validateTagsConfiguration()
+
+	// Log current mandatory fields status
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
+	log.Printf("OpsGenie initialized with mandatory fields: %+v", mandatoryFields)
 
 	// First check for API key in environment variables
 	apiKey := os.Getenv(EnvOpsGenieAPIKey)
 	if apiKey == "" {
-		// Fall back to config file if not in environment
 		apiKey = o.config.APIKey
 		if apiKey == "" {
 			return fmt.Errorf("OpsGenie API key not found in environment or config")
@@ -157,7 +389,7 @@ func (o *OpsGenieClient) Initialize() error {
 		apiUrl = "https://api.eu.opsgenie.com"
 	}
 
-	// Allow custom API URL override for on-prem or other deployments
+	// Allow custom API URL override
 	customURL := os.Getenv(EnvOpsGenieAPIURL)
 	if customURL != "" {
 		apiUrl = customURL
@@ -165,8 +397,6 @@ func (o *OpsGenieClient) Initialize() error {
 		apiUrl = o.config.APIURL
 	}
 
-	// The OpsGenie Go SDK doesn't have a direct field for setting the API URL
-	// in the config directly, so we log it for debugging
 	log.Printf("Using OpsGenie API URL: %s", apiUrl)
 
 	// Create the alert client
@@ -188,70 +418,18 @@ func (o *OpsGenieClient) Initialize() error {
 	return nil
 }
 
-// isEnabledForEnvironment checks if OpsGenie is enabled for the current environment
-func (o *OpsGenieClient) isEnabledForEnvironment() bool {
-	if o == nil || o.config == nil {
-		return false
-	}
-
-	// If we're not using environments, just use the global enabled flag
-	if !o.config.UseEnvironments {
-		return o.config.Enabled
-	}
-
-	// Check if we have environment-specific settings
-	if o.config.EnvironmentSettings != nil {
-		if envConfig, exists := o.config.EnvironmentSettings[string(o.environment)]; exists {
-			return envConfig.Enabled
-		}
-	}
-
-	// Fall back to global enabled setting
-	return o.config.Enabled
-}
-
 // getPriorityForEnvironment returns the appropriate priority for the current environment
 func (o *OpsGenieClient) getPriorityForEnvironment() alert.Priority {
 	if o == nil || o.config == nil {
-		return alert.P3 // Default to P3 if no config
+		return alert.P3
 	}
 
-	// If we're not using environments, just use the global priority
-	var priorityStr string
-	if !o.config.UseEnvironments {
-		priorityStr = o.config.Priority
-	} else {
-		// Check if we have environment-specific settings
-		if o.config.EnvironmentSettings != nil {
-			if envConfig, exists := o.config.EnvironmentSettings[string(o.environment)]; exists && envConfig.Priority != "" {
-				priorityStr = envConfig.Priority
-			}
-		}
+	var priorityStr = o.config.Priority
 
-		// Fall back to global priority
-		if priorityStr == "" && o.config.Priority != "" {
-			priorityStr = o.config.Priority
-		}
-
-		// If still empty, default based on environment
-		if priorityStr == "" {
-			switch o.environment {
-			case EnvProduction:
-				priorityStr = "P1" // Critical for production
-			case EnvUAT:
-				priorityStr = "P3" // Medium for UAT
-			default:
-				priorityStr = "P5" // Low for development
-			}
-		}
-	}
-
-	// If priorityStr is still empty at this point, use a default
 	if priorityStr == "" {
 		priorityStr = "P3"
 	}
 
-	// Convert string to alert.Priority
 	switch priorityStr {
 	case "P1":
 		return alert.P1
@@ -275,11 +453,9 @@ func (o *OpsGenieClient) TestConnection() error {
 		return fmt.Errorf("OpsGenie client not initialized")
 	}
 
-	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Try to list one alert to test connection
 	listReq := &alert.ListAlertRequest{
 		Limit: 1,
 	}
@@ -303,24 +479,20 @@ func (o *OpsGenieClient) IsOnCooldown(alertType string) bool {
 		return false
 	}
 
-	// No cooldown check if cooldown is disabled (0 seconds)
 	if o.config.AlertCooldownSeconds <= 0 {
 		log.Printf("COOLDOWN CHECK: No cooldown for %s (cooldown disabled)", alertType)
 		return false
 	}
 
-	// Acquire lock for safe reading from the map
 	o.mutex.RLock()
 	defer o.mutex.RUnlock()
 
-	// Check if alert has been sent at all
 	lastAlertTime, exists := o.lastAlertTime[alertType]
 	if !exists {
 		log.Printf("COOLDOWN CHECK: No cooldown for %s (first occurrence)", alertType)
 		return false
 	}
 
-	// Calculate if cooldown period has passed
 	cooldownDuration := time.Duration(o.config.AlertCooldownSeconds) * time.Second
 	now := time.Now()
 	cooldownEnds := lastAlertTime.Add(cooldownDuration)
@@ -343,7 +515,6 @@ func (o *OpsGenieClient) RecordAlert(alertType string) {
 		return
 	}
 
-	// Acquire lock for safe writing to the map
 	o.mutex.Lock()
 	defer o.mutex.Unlock()
 
@@ -372,70 +543,364 @@ func (o *OpsGenieClient) determineAlertKey(alertType string, details string) str
 	return fmt.Sprintf("%s-%s-%s", o.getAPIIdentifier(), alertType, details)
 }
 
+// getAPIIdentifier gets a string that uniquely identifies the API for alerts
+func (o *OpsGenieClient) getAPIIdentifier() string {
+	if o == nil || o.config == nil {
+		return "unknown-api"
+	}
+
+	if o.config.APIName != "" {
+		if o.config.APINamespace != "" {
+			return fmt.Sprintf("%s/%s", o.config.APINamespace, o.config.APIName)
+		}
+		return o.config.APIName
+	}
+
+	return o.config.Source
+}
+
+// processAndValidateTags Process the simple tags and marks those that have no key format: Value
+func (o *OpsGenieClient) processAndValidateTags(alertType string) []string {
+	var processedTags []string
+
+	//Process configuration tags
+	for _, tag := range o.config.Tags {
+		processedTag := o.processTag(tag)
+		processedTags = append(processedTags, processedTag)
+	}
+
+	// Add automatic system tags
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
+
+	systemTags := []string{
+		fmt.Sprintf("Environment:%s", strings.ToLower(mandatoryFields["Environment"])),
+		fmt.Sprintf("BookmakerId:%s", mandatoryFields["BookmakerId"]),
+		fmt.Sprintf("Host:%s", mandatoryFields["Host"]),
+		fmt.Sprintf("Business:%s", mandatoryFields["Business"]),
+		fmt.Sprintf("Team:%s", mandatoryFields["Team"]),
+		fmt.Sprintf("AlertType:%s", alertType),
+	}
+
+	// Add system tags
+	processedTags = append(processedTags, systemTags...)
+
+	// Add specific service tags if available
+	if o.config.APIName != "" {
+		processedTags = append(processedTags, fmt.Sprintf("Service:%s", o.config.APIName))
+	}
+
+	if o.config.ServiceTier != "" {
+		processedTags = append(processedTags, fmt.Sprintf("Tier:%s", o.config.ServiceTier))
+	}
+
+	// Add additional context if available
+	if additionalContext := o.getAdditionalContext(); additionalContext != "" {
+		processedTags = append(processedTags, fmt.Sprintf("Context:%s", additionalContext))
+	}
+
+	return processedTags
+}
+
+// processTag Process an individual tag and the brand if it does not have key format: Value
+func (o *OpsGenieClient) processTag(tag string) string {
+	// Verify if the tag has "Key: Value" format
+	if strings.Contains(tag, ":") {
+		parts := strings.SplitN(tag, ":", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
+			// Valid Tag with Key format: Value
+			return tag
+		}
+	}
+
+	// Tag without Key format: Value - Mark it
+	return fmt.Sprintf("**TAG_KEY_UNDEFINED**:%s", tag)
+}
+
+// buildEnhancedTags processes and validates tags for an alert, adding both user-defined
+// // and system-generated tags. It ensures that all tags follow a valid "key:value" format
+// // and marks those without a key as "**TAG_KEY_UNDEFINED**".
+// //
+// // Parameters:
+// //   - alertType: A string representing the type of alert (e.g., "circuit-open", "memory-threshold").
+// //
+// // Returns:
+// //   - A slice of strings containing the processed and validated tags, including both
+// //     user-defined and system-generated tags.
+func (o *OpsGenieClient) buildEnhancedTags(alertType string) []string {
+	return o.processAndValidateTags(alertType)
+}
+
+// validateTagsConfiguration Valida the tag configuration and shows warnings
+func (o *OpsGenieClient) validateTagsConfiguration() {
+	if o == nil || o.config == nil {
+		return
+	}
+
+	var undefinedTags []string
+	var validTags []string
+
+	for _, tag := range o.config.Tags {
+		if strings.Contains(tag, ":") {
+			parts := strings.SplitN(tag, ":", 2)
+			if len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
+				validTags = append(validTags, tag)
+			} else {
+				undefinedTags = append(undefinedTags, tag)
+			}
+		} else {
+			undefinedTags = append(undefinedTags, tag)
+		}
+	}
+
+	if len(validTags) > 0 {
+		log.Printf("✅ Valid key:value tags: %v", validTags)
+	}
+
+	if len(undefinedTags) > 0 {
+		log.Printf("⚠️  Tags without key:value format (will be marked as **TAG_KEY_UNDEFINED**): %v", undefinedTags)
+		log.Printf("💡 Consider using format like 'Component:circuit-breaker' instead of just 'circuit-breaker'")
+	}
+}
+
+// buildEnhancedDetails creates comprehensive details map with mandatory and optional fields
+func (o *OpsGenieClient) buildEnhancedDetails(alertType string, specificDetails map[string]string) map[string]string {
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
+
+	details := make(map[string]string)
+
+	// Add mandatory fields
+	for key, value := range mandatoryFields {
+		details[key] = value
+	}
+
+	// Add standard API information
+	details["API Name"] = o.config.APIName
+	details["API Version"] = o.config.APIVersion
+	details["API Namespace"] = o.config.APINamespace
+	details["API Owner"] = o.config.APIOwner
+	details["API Priority"] = o.config.APIPriority
+	details["Alert Type"] = alertType
+	details["Source"] = o.config.Source
+
+	// Add system information
+	details["Go Version"] = runtime.Version()
+	details["Architecture"] = fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
+	details["Goroutines"] = fmt.Sprintf("%d", runtime.NumGoroutine())
+
+	// Add timestamp
+	details["Alert Timestamp"] = time.Now().UTC().Format(time.RFC3339)
+
+	// Add specific alert details
+	for key, value := range specificDetails {
+		details[key] = value
+	}
+
+	return details
+}
+
+// buildEnhancedDescription creates detailed description with all context
+func (o *OpsGenieClient) buildEnhancedDescription() string {
+	if o == nil || o.config == nil {
+		return ""
+	}
+
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
+
+	// Prepare additional context section
+	additionalContextSection := ""
+	if additionalContext := mandatoryFields["AdditionalContext"]; additionalContext != "" {
+		additionalContextSection = fmt.Sprintf("• Additional Context: %s\n", additionalContext)
+	}
+
+	description := fmt.Sprintf(`Circuit Breaker Alert Details:
+
+MANDATORY FIELDS:
+• Team: %s
+• Environment: %s  
+• Bookmaker ID: %s
+• Host: %s
+• Business: %s
+%s
+SERVICE INFORMATION:
+• API Name: %s
+• API Version: %s
+• Namespace: %s
+• Owner: %s
+• Priority: %s
+
+SYSTEM INFORMATION:
+• Hostname: %s
+• Runtime: Go %s
+• Architecture: %s/%s
+`,
+		mandatoryFields["Team"],
+		mandatoryFields["Environment"],
+		mandatoryFields["BookmakerId"],
+		mandatoryFields["Host"],
+		mandatoryFields["Business"],
+		additionalContextSection,
+		o.config.APIName,
+		o.config.APIVersion,
+		o.config.APINamespace,
+		o.config.APIOwner,
+		o.config.APIPriority,
+		mandatoryFields["Host"],
+		runtime.Version(),
+		runtime.GOOS,
+		runtime.GOARCH,
+	)
+
+	// Add dependencies if available
+	if len(o.config.APIDependencies) > 0 {
+		description += "\nDEPENDENCIES:\n"
+		for _, dep := range o.config.APIDependencies {
+			description += fmt.Sprintf("• %s\n", dep)
+		}
+	}
+
+	// Add endpoints if available
+	if len(o.config.APIEndpoints) > 0 {
+		description += "\nPROTECTED ENDPOINTS:\n"
+		for _, endpoint := range o.config.APIEndpoints {
+			description += fmt.Sprintf("• %s\n", endpoint)
+		}
+	}
+
+	// Add contact information if available
+	if o.config.ContactDetails.PrimaryContact != "" {
+		description += fmt.Sprintf("\nCONTACT INFORMATION:\n")
+		description += fmt.Sprintf("• Primary Contact: %s\n", o.config.ContactDetails.PrimaryContact)
+
+		if o.config.ContactDetails.EscalationTeam != "" {
+			description += fmt.Sprintf("• Escalation Team: %s\n", o.config.ContactDetails.EscalationTeam)
+		}
+
+		if o.config.ContactDetails.SlackChannel != "" {
+			description += fmt.Sprintf("• Slack Channel: %s\n", o.config.ContactDetails.SlackChannel)
+		}
+	}
+
+	return description
+}
+
+// createValidatedAlertRequest creates an alert request with all mandatory fields validated
+func (o *OpsGenieClient) createValidatedAlertRequest(alertType, message, description string, specificDetails map[string]string) (*alert.CreateAlertRequest, error) {
+	// First validate mandatory fields
+	if err := o.ValidateMandatoryFields(); err != nil {
+		log.Printf("WARNING: Mandatory fields validation failed: %v", err)
+		// Continue with warning but use fallback values
+	}
+
+	// Build mandatory fields (with fallbacks)
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
+
+	// Build enhanced tags
+	tags := o.buildEnhancedTags(alertType)
+
+	// Build enhanced details
+	details := o.buildEnhancedDetails(alertType, specificDetails)
+
+	// Get priority
+	priority := o.getPriorityForEnvironment()
+
+	// Create the alert request
+	req := &alert.CreateAlertRequest{
+		Message:     message,
+		Description: description,
+		Alias:       o.createUniqueAlertIdentifier(alertType),
+		Source:      o.getSourceWithFallback(),
+		Priority:    priority,
+		Tags:        tags,
+		Details:     details,
+	}
+
+	// Add team responder if valid
+	teamName := mandatoryFields["Team"]
+	if teamName != "unknown-team" && teamName != "" {
+		req.Responders = []alert.Responder{
+			{
+				Type: "team",
+				Name: teamName,
+			},
+		}
+	}
+
+	// Log the alert details for debugging
+	log.Printf("Creating OpsGenie alert with mandatory fields: Team=%s, Environment=%s, BookmakerID=%s, Host=%s, Business=%s",
+		mandatoryFields["Team"],
+		mandatoryFields["Environment"],
+		mandatoryFields["BookmakerId"],
+		mandatoryFields["Host"],
+		mandatoryFields["Business"])
+
+	return req, nil
+}
+
+// createUniqueAlertIdentifier creates a unique identifier for the alert
+func (o *OpsGenieClient) createUniqueAlertIdentifier(alertType string) string {
+	apiID := o.getAPIIdentifier()
+	return fmt.Sprintf("%s-%s", apiID, alertType)
+}
+
+// memoryStatusString returns a string representation of memory status
+func memoryStatusString(memoryOK bool) string {
+	if memoryOK {
+		return "OK"
+	}
+	return "THRESHOLD EXCEEDED"
+}
+
 // SendBreakerOpenAlert sends an alert when the circuit breaker opens
 func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, waitTime int) error {
 	if o == nil || !o.config.Enabled || !o.config.TriggerOnOpen {
 		return nil
 	}
 
-	// Not initialized, log and skip
-	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+	if !o.IsInitialized() {
 		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
 		return nil
 	}
 
-	// Determine the alert type
+	// Check cooldown
 	alertType := "circuit-open"
 	details := fmt.Sprintf("latency-%dms-%s-wait%ds", latency, memoryStatusString(memoryOK), waitTime)
 	alertKey := o.determineAlertKey(alertType, details)
 
-	// Check if we're in a cooldown period for this alert type
 	if o.IsOnCooldown(alertKey) {
 		log.Printf("Skipping alert for %s due to cooldown period", alertKey)
 		return nil
 	}
 
-	// Determine the appropriate priority based on the environment
-	priority := o.getPriorityForEnvironment()
+	// Build mandatory fields for message
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
 
-	// Format the message for this alert
-	message := fmt.Sprintf("%s: Circuit breaker OPEN. [%dms latency] [Memory OK: %t] [Will wait %ds]",
-		o.getAPIIdentifier(), latency, memoryOK, waitTime)
+	// Create enhanced message with business context
+	message := fmt.Sprintf("[%s] Circuit Breaker OPEN - %s",
+		mandatoryFields["Environment"],
+		o.getAPIIdentifier())
 
-	// Create the request with common fields
-	req := &alert.CreateAlertRequest{
-		Message:     message,
-		Description: o.buildAPIInfoDetails(),
-		Alias:       o.createUniqueAlertIdentifier(alertType),
-		Source:      o.config.Source,
-		Priority:    priority,
-		Tags:        []string{"circuit-breaker", "open"},
-		Details: map[string]string{
-			"API":            o.config.APIName,
-			"API Version":    o.config.APIVersion,
-			"Latency":        fmt.Sprintf("%d", latency),
-			"Memory OK":      fmt.Sprintf("%t", memoryOK),
-			"Wait Time":      fmt.Sprintf("%d", waitTime),
-			"Is First Alert": fmt.Sprintf("%t", !o.hasAlertBeenSent(alertKey)),
-			"Alert Type":     alertType,
-			"Alert Details":  details,
-			"Environment":    string(o.environment),
-		},
+	// Build description
+	description := o.buildEnhancedDescription()
+
+	// Create validated alert request
+	specificDetails := map[string]string{
+		"Latency":       fmt.Sprintf("%d", latency),
+		"Memory OK":     fmt.Sprintf("%t", memoryOK),
+		"Wait Time":     fmt.Sprintf("%d", waitTime),
+		"Alert Type":    alertType,
+		"Alert Details": details,
 	}
 
-	// Add team if specified
-	if o.config.Team != "" {
-		req.Responders = []alert.Responder{
-			{
-				Type: "team",
-				Name: o.config.Team,
-			},
-		}
+	req, err := o.createValidatedAlertRequest(alertType, message, description, specificDetails)
+	if err != nil {
+		log.Printf("Failed to create validated alert request: %v", err)
+		return err
 	}
 
 	// Send the alert
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
 	resp, err := o.alertClient.Create(ctx, req)
 	if err != nil {
 		log.Printf("Error sending OpsGenie alert: %v", err)
@@ -447,6 +912,8 @@ func (o *OpsGenieClient) SendBreakerOpenAlert(latency int64, memoryOK bool, wait
 
 	log.Printf("ALERT SENT: Circuit breaker OPEN alert sent to OpsGenie. RequestID: %s, Priority: %s, Key: %s",
 		resp.RequestId, req.Priority, alertKey)
+	log.Printf("Alert sent with fields: %+v", mandatoryFields)
+
 	return nil
 }
 
@@ -456,53 +923,36 @@ func (o *OpsGenieClient) SendBreakerResetAlert() error {
 		return nil
 	}
 
-	// Not initialized, log and skip
-	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+	if !o.IsInitialized() {
 		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
 		return nil
 	}
 
-	// Determine the alert type
 	alertType := "circuit-reset"
 	alertKey := o.determineAlertKey(alertType, "reset")
 
-	// Check if we're in a cooldown period for this alert type
 	if o.IsOnCooldown(alertKey) {
 		log.Printf("Skipping alert for %s due to cooldown period", alertKey)
 		return nil
 	}
 
-	// Determine the appropriate priority based on the environment
-	priority := o.getPriorityForEnvironment()
+	// Build mandatory fields for message
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
 
-	// Format the message for this alert
-	message := fmt.Sprintf("%s: Circuit breaker RESET. Service is healthy again.", o.getAPIIdentifier())
+	message := fmt.Sprintf("[%s] Circuit Breaker RESET - %s",
+		mandatoryFields["Environment"],
+		o.getAPIIdentifier())
 
-	// Create the request with common fields
-	req := &alert.CreateAlertRequest{
-		Message:     message,
-		Description: o.buildAPIInfoDetails(),
-		Alias:       o.createUniqueAlertIdentifier(alertType),
-		Source:      o.config.Source,
-		Priority:    priority,
-		Tags:        []string{"circuit-breaker", "reset"},
-		Details: map[string]string{
-			"API":            o.config.APIName,
-			"API Version":    o.config.APIVersion,
-			"Is First Alert": fmt.Sprintf("%t", !o.hasAlertBeenSent(alertKey)),
-			"Alert Type":     alertType,
-			"Environment":    string(o.environment),
-		},
+	description := o.buildEnhancedDescription()
+
+	specificDetails := map[string]string{
+		"Alert Type": alertType,
 	}
 
-	// Add team if specified
-	if o.config.Team != "" {
-		req.Responders = []alert.Responder{
-			{
-				Type: "team",
-				Name: o.config.Team,
-			},
-		}
+	req, err := o.createValidatedAlertRequest(alertType, message, description, specificDetails)
+	if err != nil {
+		log.Printf("Failed to create validated alert request: %v", err)
+		return err
 	}
 
 	// Send the alert
@@ -514,11 +964,12 @@ func (o *OpsGenieClient) SendBreakerResetAlert() error {
 		return err
 	}
 
-	// Record the alert time for cooldown
 	o.RecordAlert(alertKey)
 
 	log.Printf("ALERT SENT: Circuit breaker RESET alert sent to OpsGenie. RequestID: %s, Priority: %s, Key: %s",
 		resp.RequestId, req.Priority, alertKey)
+	log.Printf("Alert sent with fields: %+v", mandatoryFields)
+
 	return nil
 }
 
@@ -528,60 +979,43 @@ func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) er
 		return nil
 	}
 
-	// Not initialized, log and skip
-	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+	if !o.IsInitialized() {
 		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
 		return nil
 	}
 
-	// Determine the alert type
 	alertType := "memory-threshold"
 	details := fmt.Sprintf("%.1f-percent", memoryStatus.CurrentUsage)
 	alertKey := o.determineAlertKey(alertType, details)
 
-	// Check if we're in a cooldown period for this alert type
 	if o.IsOnCooldown(alertKey) {
 		log.Printf("Skipping alert for %s due to cooldown period", alertKey)
 		return nil
 	}
 
-	// Determine the appropriate priority based on the environment
-	priority := o.getPriorityForEnvironment()
+	// Build mandatory fields for message
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
 
-	// Format the message for this alert
-	message := fmt.Sprintf("%s: Memory usage at %.2f%% (threshold: %.2f%%)",
-		o.getAPIIdentifier(), memoryStatus.CurrentUsage, memoryStatus.Threshold)
+	message := fmt.Sprintf("[%s] Memory Threshold Exceeded - %s (%.2f%%)",
+		mandatoryFields["Environment"],
+		o.getAPIIdentifier(),
+		memoryStatus.CurrentUsage)
 
-	// Create the request with common fields
-	req := &alert.CreateAlertRequest{
-		Message:     message,
-		Description: o.buildAPIInfoDetails(),
-		Alias:       o.createUniqueAlertIdentifier(alertType),
-		Source:      o.config.Source,
-		Priority:    priority,
-		Tags:        []string{"memory", "threshold"},
-		Details: map[string]string{
-			"API":             o.config.APIName,
-			"API Version":     o.config.APIVersion,
-			"Current Usage":   fmt.Sprintf("%.2f%%", memoryStatus.CurrentUsage),
-			"Threshold":       fmt.Sprintf("%.2f%%", memoryStatus.Threshold),
-			"Total Memory MB": fmt.Sprintf("%.2f", float64(memoryStatus.TotalMemory)/(1024*1024)),
-			"Used Memory MB":  fmt.Sprintf("%.2f", float64(memoryStatus.UsedMemory)/(1024*1024)),
-			"Is First Alert":  fmt.Sprintf("%t", !o.hasAlertBeenSent(alertKey)),
-			"Alert Type":      alertType,
-			"Alert Details":   details,
-			"Environment":     string(o.environment),
-		},
+	description := o.buildEnhancedDescription()
+
+	specificDetails := map[string]string{
+		"Current Usage":   fmt.Sprintf("%.2f%%", memoryStatus.CurrentUsage),
+		"Threshold":       fmt.Sprintf("%.2f%%", memoryStatus.Threshold),
+		"Total Memory MB": fmt.Sprintf("%.2f", float64(memoryStatus.TotalMemory)/(1024*1024)),
+		"Used Memory MB":  fmt.Sprintf("%.2f", float64(memoryStatus.UsedMemory)/(1024*1024)),
+		"Alert Type":      alertType,
+		"Alert Details":   details,
 	}
 
-	// Add team if specified
-	if o.config.Team != "" {
-		req.Responders = []alert.Responder{
-			{
-				Type: "team",
-				Name: o.config.Team,
-			},
-		}
+	req, err := o.createValidatedAlertRequest(alertType, message, description, specificDetails)
+	if err != nil {
+		log.Printf("Failed to create validated alert request: %v", err)
+		return err
 	}
 
 	// Send the alert
@@ -593,11 +1027,12 @@ func (o *OpsGenieClient) SendMemoryThresholdAlert(memoryStatus *MemoryStatus) er
 		return err
 	}
 
-	// Record the alert time for cooldown
 	o.RecordAlert(alertKey)
 
 	log.Printf("ALERT SENT: Memory threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Usage: %.2f%%, Key: %s",
 		resp.RequestId, req.Priority, memoryStatus.CurrentUsage, alertKey)
+	log.Printf("Alert sent with fields: %+v", mandatoryFields)
+
 	return nil
 }
 
@@ -607,58 +1042,41 @@ func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64, thresholdMs in
 		return nil
 	}
 
-	// Not initialized, log and skip
-	if !o.IsInitialized() || !o.isEnabledForEnvironment() {
+	if !o.IsInitialized() {
 		log.Printf("OpsGenie client not initialized or not enabled for environment, skipping alert")
 		return nil
 	}
 
-	// Determine the alert type
 	alertType := "latency-threshold"
 	details := fmt.Sprintf("%dms", latency)
 	alertKey := o.determineAlertKey(alertType, details)
 
-	// Check if we're in a cooldown period for this alert type
 	if o.IsOnCooldown(alertKey) {
 		log.Printf("Skipping alert for %s due to cooldown period", alertKey)
 		return nil
 	}
 
-	// Determine the appropriate priority based on the environment
-	priority := o.getPriorityForEnvironment()
+	// Build mandatory fields for message
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
 
-	// Format the message for this alert
-	message := fmt.Sprintf("%s: High latency detected. Current: %dms (threshold: %dms)",
-		o.getAPIIdentifier(), latency, thresholdMs)
+	message := fmt.Sprintf("[%s] High Latency Detected - %s (%dms)",
+		mandatoryFields["Environment"],
+		o.getAPIIdentifier(),
+		latency)
 
-	// Create the request with common fields
-	req := &alert.CreateAlertRequest{
-		Message:     message,
-		Description: o.buildAPIInfoDetails(),
-		Alias:       o.createUniqueAlertIdentifier(alertType),
-		Source:      o.config.Source,
-		Priority:    priority,
-		Tags:        []string{"latency", "threshold"},
-		Details: map[string]string{
-			"API":            o.config.APIName,
-			"API Version":    o.config.APIVersion,
-			"Latency":        fmt.Sprintf("%dms", latency),
-			"Threshold":      fmt.Sprintf("%dms", thresholdMs),
-			"Is First Alert": fmt.Sprintf("%t", !o.hasAlertBeenSent(alertKey)),
-			"Alert Type":     alertType,
-			"Alert Details":  details,
-			"Environment":    string(o.environment),
-		},
+	description := o.buildEnhancedDescription()
+
+	specificDetails := map[string]string{
+		"Latency":       fmt.Sprintf("%dms", latency),
+		"Threshold":     fmt.Sprintf("%dms", thresholdMs),
+		"Alert Type":    alertType,
+		"Alert Details": details,
 	}
 
-	// Add team if specified
-	if o.config.Team != "" {
-		req.Responders = []alert.Responder{
-			{
-				Type: "team",
-				Name: o.config.Team,
-			},
-		}
+	req, err := o.createValidatedAlertRequest(alertType, message, description, specificDetails)
+	if err != nil {
+		log.Printf("Failed to create validated alert request: %v", err)
+		return err
 	}
 
 	// Send the alert
@@ -670,103 +1088,99 @@ func (o *OpsGenieClient) SendLatencyThresholdAlert(latency int64, thresholdMs in
 		return err
 	}
 
-	// Record the alert time for cooldown
 	o.RecordAlert(alertKey)
 
 	log.Printf("ALERT SENT: Latency threshold alert sent to OpsGenie. RequestID: %s, Priority: %s, Latency: %dms, Key: %s",
 		resp.RequestId, req.Priority, latency, alertKey)
+	log.Printf("Alert sent with fields: %+v", mandatoryFields)
+
 	return nil
 }
 
-// buildAPIInfoDetails creates a structured description of the API for alert details
-func (o *OpsGenieClient) buildAPIInfoDetails() string {
+// ValidateConfigurationAtStartup validates the configuration when the service starts
+func (o *OpsGenieClient) ValidateConfigurationAtStartup() error {
 	if o == nil || o.config == nil {
-		return ""
+		return fmt.Errorf("OpsGenie client or configuration is nil")
 	}
 
-	// Build a detailed description including all available API information
-	details := ""
+	log.Printf("Validating OpsGenie configuration...")
 
-	// Add API basic information
-	if o.config.APIName != "" {
-		details += fmt.Sprintf("API: %s\n", o.config.APIName)
-	}
-
-	if o.config.APIVersion != "" {
-		details += fmt.Sprintf("Version: %s\n", o.config.APIVersion)
-	}
-
-	if o.config.APINamespace != "" {
-		details += fmt.Sprintf("Environment: %s\n", o.config.APINamespace)
-	}
-
-	if o.config.APIDescription != "" {
-		details += fmt.Sprintf("\nDescription: %s\n", o.config.APIDescription)
-	}
-
-	if o.config.APIOwner != "" {
-		details += fmt.Sprintf("Owner: %s\n", o.config.APIOwner)
-	}
-
-	if o.config.APIPriority != "" {
-		details += fmt.Sprintf("Business Priority: %s\n", o.config.APIPriority)
-	}
-
-	// Add dependencies if available
-	if len(o.config.APIDependencies) > 0 {
-		details += "\nDependencies:\n"
-		for _, dep := range o.config.APIDependencies {
-			details += fmt.Sprintf("- %s\n", dep)
+	// Perform mandatory fields validation
+	if err := o.ValidateMandatoryFields(); err != nil {
+		log.Printf("❌ Mandatory fields validation failed:")
+		for _, field := range err.MissingFields {
+			log.Printf("   - Missing field: %s", field)
 		}
-	}
-
-	// Add protected endpoints if available
-	if len(o.config.APIEndpoints) > 0 {
-		details += "\nProtected Endpoints:\n"
-		for _, endpoint := range o.config.APIEndpoints {
-			details += fmt.Sprintf("- %s\n", endpoint)
+		for field, reason := range err.InvalidFields {
+			log.Printf("   - Invalid field %s: %s", field, reason)
 		}
+
+		log.Printf("⚠️  Alerts will be sent with fallback values. Please review configuration.")
+	} else {
+		log.Printf("✅ All mandatory fields are properly configured")
 	}
 
-	// Add custom attributes if available
-	if len(o.config.APICustomAttributes) > 0 {
-		details += "\nAdditional Information:\n"
-		for k, v := range o.config.APICustomAttributes {
-			details += fmt.Sprintf("- %s: %s\n", k, v)
+	// Show current field values
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
+	log.Printf("Current mandatory field values:")
+	for field, value := range mandatoryFields {
+		log.Printf("   - %s: %s", field, value)
+	}
+
+	// Validate OpsGenie connectivity if enabled
+	if o.config.Enabled {
+		if err := o.TestConnection(); err != nil {
+			log.Printf("❌ OpsGenie connectivity test failed: %v", err)
+			return fmt.Errorf("OpsGenie connectivity test failed: %v", err)
 		}
+		log.Printf("✅ OpsGenie connectivity test passed")
 	}
 
-	return details
+	return nil
 }
 
-// getAPIIdentifier gets a string that uniquely identifies the API for alerts
-func (o *OpsGenieClient) getAPIIdentifier() string {
+// GenerateConfigurationReport generates a configuration validation report
+func (o *OpsGenieClient) GenerateConfigurationReport() string {
 	if o == nil || o.config == nil {
-		return "unknown-api"
+		return "❌ OpsGenie client or configuration is nil"
 	}
 
-	if o.config.APIName != "" {
-		// If we have namespace and name, combine them
-		if o.config.APINamespace != "" {
-			return fmt.Sprintf("%s/%s", o.config.APINamespace, o.config.APIName)
+	report := "OpsGenie Configuration Report:\n"
+	report += "================================\n\n"
+
+	// Basic configuration
+	report += fmt.Sprintf("Enabled: %t\n", o.config.Enabled)
+	report += fmt.Sprintf("Region: %s\n", o.config.Region)
+	report += fmt.Sprintf("Priority: %s\n", o.config.Priority)
+	report += fmt.Sprintf("Source: %s\n", o.config.Source)
+	report += "\n"
+
+	// Mandatory fields
+	mandatoryFields := o.buildMandatoryFieldsWithFallbacks()
+	report += "Mandatory Fields:\n"
+	report += "-----------------\n"
+	for field, value := range mandatoryFields {
+		status := "✅"
+		if value == "unknown" || value == "unknown-team" || value == "" {
+			status = "⚠️ "
 		}
-		return o.config.APIName
+		report += fmt.Sprintf("%s %s: %s\n", status, field, value)
+	}
+	report += "\n"
+
+	// Validation status
+	if err := o.ValidateMandatoryFields(); err != nil {
+		report += "Validation Issues:\n"
+		report += "------------------\n"
+		for _, field := range err.MissingFields {
+			report += fmt.Sprintf("❌ Missing: %s\n", field)
+		}
+		for field, reason := range err.InvalidFields {
+			report += fmt.Sprintf("❌ Invalid %s: %s\n", field, reason)
+		}
+	} else {
+		report += "✅ All mandatory fields validated successfully\n"
 	}
 
-	// Fallback to source if no API name is set
-	return o.config.Source
-}
-
-// memoryStatusString returns a string representation of memory status
-func memoryStatusString(memoryOK bool) string {
-	if memoryOK {
-		return "OK"
-	}
-	return "THRESHOLD EXCEEDED"
-}
-
-// createUniqueAlertIdentifier creates a unique identifier for the alert
-func (o *OpsGenieClient) createUniqueAlertIdentifier(alertType string) string {
-	apiID := o.getAPIIdentifier()
-	return fmt.Sprintf("%s-%s", apiID, alertType)
+	return report
 }
